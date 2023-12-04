@@ -9,7 +9,18 @@ SDL_Renderer *renderer;
 SDL_Surface *surface;
 #define w 512
 #define h 512
+int running=1;
 int t = 0;
+void events(){
+   SDL_Event e;
+   while (SDL_PollEvent(&e)) {
+      if (e.type == SDL_QUIT){
+         SDL_Quit();
+         printf("quiting\n");
+         running=0;
+      }
+   }
+}
 void tick(){
 }
 void render(){
@@ -33,6 +44,7 @@ void render(){
     SDL_DestroyTexture(screenTexture);
 }
 void mainLoop(){
+   events();
    tick();
    render();
    t++;
@@ -48,7 +60,7 @@ int main(int argc, char* argv[]) {
     #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop(mainLoop, 0, 1);
     #else
-    while(1) {        
+    while(running) {        
         mainLoop();
         SDL_Delay(16);
     }
