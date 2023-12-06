@@ -6,8 +6,10 @@ run: linux
 wasm:
 	-mkdir out
 	-mkdir build
-	emcc -c src/* -o build/app.o -s USE_SDL=2
-	emcc build/app.o -o build/index.html -s USE_SDL=2
+	echo "step1:"
+	emcc -c src/* -s USE_SDL=2 -o build/app.o 
+	echo "step2:"
+	emcc build/app.o -o build/index.html -s USE_SDL=2 -sMAX_WEBGL_VERSION=2 
 
 web: wasm
 	sudo cp build/index.html build/index.js build/index.wasm /var/www/html/

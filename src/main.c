@@ -1,10 +1,13 @@
 #include <SDL.h>
+#include <alloca.h>
 #include <math.h>
 #include <stdio.h>
 #include <SDL2/SDL_opengl.h>
 #include <strings.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include <emscripten/html5.h>
+#include "SDL_opengles2.h"
 #endif
 #include <stdbool.h>
 #include <stdlib.h>
@@ -25,12 +28,12 @@ static unsigned int compileShader(unsigned int type, const char* src){
    int res;
    glGetShaderiv(id, GL_COMPILE_STATUS,&res);
    if(!res){
-      printf("%s\n",res);
       int l;
-      glGetShaderiv(id,GL_INFO_LOG_LENGTH, &res);
-      char msg[l];
+      glGetShaderiv(id,GL_INFO_LOG_LENGTH, &l);
+      char* msg = alloca(l * sizeof(char));
       glGetShaderInfoLog(id,l,&l,msg);
-      printf("Shader Compile error:\n%s\n",msg);
+      printf("Shader Compile<%s> error:\n<----------\n %s \n----------->\n",(type == GL_VERTEX_SHADER ? "vert" : "frag") ,msg);
+      
    glDeleteShader(id);
       return 0;;
    }
@@ -81,30 +84,6 @@ void render(){
    glViewport(0, 0, w, h);
 
 
-   //data, remove from loop...
-   static float pos[6]={ -.5f,-.5f,.0f,.5f,.5f,-.5f}; //vertex pos x1,y1,x2...
-   unsigned int buff;
-   glGenBuffers(1, &buff);
-   glBindBuffer(GL_ARRAY_BUFFER, buff);//->Draws array
-   glBufferData(GL_ARRAY_BUFFER,6*sizeof(float), pos, GL_DYNAMIC_DRAW);
-   glEnableVertexAttribArray(0);
-   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2,0);
-
-   unsigned int shader=mkShader(
-   "#version 330 core\n"
-   "layout(location = 0) in vec4 position;\n"
-   "void main(){\n"
-   "  gl_Position = position; \n"
-   "}\n"
-      , 
-   "#version 330 core\n"
-   "layout(location = 0) out vec4 color;\n"
-   "void main(){\n"
-   "  color=vec4(1.0,.0,.5,1.0);\n"
-   "}\n"
-   );
-   glUseProgram(shader);
-   //..........
 
    glDrawArrays(GL_TRIANGLES, 0, 3);
 
@@ -152,15 +131,60 @@ void init(){
    SDL_GL_SetSwapInterval(1);//vsync
 
    //magic matrix stuff
+  /*
    glMatrixMode(GL_PROJECTION); 
    glLoadIdentity();
    glOrtho(.0, .0, 10.0, 10.0, -20.0, 20.0);//clipping plane?
    glMatrixMode(GL_MODELVIEW);
    glLoadIdentity();
+   */
    //render setting
-   glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LESS); //Z-Buffer
-   glShadeModel(GL_SMOOTH);// smooth shading? GL_SMOOT : HGL_FLAT 
+   //glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LESS); //Z-Buffer
+   //glShadeModel(GL_SMOOTH);// smooth shading? GL_SMOOT : HGL_FLAT 
    //keymap init
+
+
+
+
+   //data, remove from loop...
+   static float pos[6]={ -.5f,-.5f,.0f,.5f,.5f,-.5f}; //vertex pos x1,y1,x2...
+   unsigned int buff;
+   glGenBuffers(1, &buff);
+   glBindBuffer(GL_ARRAY_BUFFER, buff);//->Draws array
+   glBufferData(GL_ARRAY_BUFFER,6*sizeof(float), pos, GL_DYNAMIC_DRAW);
+   glEnableVertexAttribArray(0);
+   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2,0);
+
+   unsigned int shader=mkShader(
+      "attribute vec4 a_position;\n"
+   "void main() {\n"
+   "    gl_Position = a_position;\n"
+   " }\n"
+      ,
+   " precision mediump float;\n"
+   "  \n"
+   " void main() {\n"
+   "    gl_FragColor =vec4(1.0,.0,.5,1.0);\n"
+   " }\n");
+
+   /*"#version 330 core\n"
+   "layout(location = 0) in vec4 position;\n"
+   "attribute vec4 position;    \n"
+   "void main(){\n"
+   "  gl_Position = position; \n"
+   "}\n"
+    , 
+   "#version 330 core\n"
+   "layout(location = 0) out vec4 color;\n"
+      
+   "void main(){\n"
+   "  color=vec4(1.0,.0,.5,1.0);\n"
+   "}\n"
+   );*/
+   glUseProgram(shader);
+   //..........
+
+
 
    printf("%s\n",glGetString(GL_VERSION));
    for(int i = 0; i < 322; i++) { // init them all to false
