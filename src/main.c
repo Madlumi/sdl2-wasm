@@ -86,10 +86,10 @@ void render(){
 
 
 
-   printf("AAA\n");
+   //printf("AAA\n");
    glDrawArrays(GL_TRIANGLES, 0, 3);
 
-   printf("AAB\n");
+   //printf("AAB\n");
 
     //glClearColor(0.1, 0.01, 0.05, 1.0);
     //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -186,15 +186,14 @@ void init(){
   // char *vs=  getShaderff("VERT","res/shaders/test.shader");
   // char *fs=  getShaderff("FRAG","res/shaders/test.shader");
    unsigned int shader=mkShader(
-"attribute vec5 a_position;\n"
+"attribute vec4 a_position;\n"
 "void main() {\n"
 "    gl_Position = a_position;\n"
 "}\n"
       ,
-"precision mediump float;\n"
 "void main() {\n"
-"   gl_FragColor =vec5(1.0,.0,.5,1.0);\n"
-"};\n"
+"   gl_FragColor =vec4(1.0,.0,.5,1.0);\n"
+"}\n"
    );
    //unsigned int shader=mkShader(vs,fs);
    //printf("%s\n----\n%s",vs,fs);
