@@ -11,6 +11,8 @@ wasm:
 
 web: wasm
 	sudo cp build/index.html build/index.js build/index.wasm /var/www/html/
+compilecmd: clean 
+	bear -- make
 clean:
 	-rm -r out/
 	-rm -r build/
