@@ -1,18 +1,17 @@
 linux:
 	-mkdir out
-	gcc src/*.c `sdl2-config --cflags --libs ` -lGL -lSDL2_image -o i
+	gcc src/main.c `sdl2-config --cflags --libs` -lSDL2_image -lGL -lm -o bp
 run: linux
-	./i
+	./bp
 wasm:
-	-mkdir out
-	-mkdir build
-	echo "step1:"
-	emcc -c src/*.c -s USE_SDL=2 -o build/app.o 
-	echo "step2:"
-	emcc build/app.o -o build/index.html -s USE_SDL=2 -sMAX_WEBGL_VERSION=2 
-
-web: wasm
-	sudo cp build/index.html build/index.js build/index.wasm /var/www/html/
+	-mkdir web_out
+	-mkdir out 
+	emcc src/main.c  --shell-file src/web/base.html   -s USE_SDL=2 -s USE_SDL_IMAGE=2 -lSDL -sMAX_WEBGL_VERSION=2 --preload-file res -s ALLOW_MEMORY_GROWTH=1 -s SDL2_IMAGE_FORMATS='["png"]' -o web_out/bp.html
+local: wasm
+	sudo cp -r web_out/*  /var/www/html/
+compilecmd:
+	bear -- make
 clean:
 	-rm -r out/
-	-rm -r build/
+	-rm -r web_out/
+

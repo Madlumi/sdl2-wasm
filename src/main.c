@@ -1,9 +1,8 @@
+#include <stdio.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
-#include "SDL_opengles2.h"
 #endif
-#include <SDL.h>
 #include "keys.c"
 #include "tick.c"
 #include "renderer.h"

@@ -1,5 +1,12 @@
-
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+#include "SDL_opengles2.h"
+#endif
+#include <SDL.h>
 #include <SDL2/SDL_opengl.h>
+#include "renderer.h"
+
 void sdlErr(){ printf("SDL initerror: %si\n",SDL_GetError()); exit(1); }
 static SDL_GLContext ctx;
 static unsigned int compileShader(unsigned int type, const char* src){
@@ -34,41 +41,14 @@ static unsigned int mkShader(const char* vss,const  char* fss){
    return program;
 }
 void renderr(){
-   
    //resizeable, and or vsync stuff, idk
    SDL_GL_MakeCurrent(window, ctx);
    SDL_GetWindowSize(window, &w, &h);
    glViewport(0, 0, w, h);
-
-
-
-   //printf("AAA\n");
    glDrawArrays(GL_TRIANGLES, 0, 3);
-
-   //printf("AAB\n");
-
-    //glClearColor(0.1, 0.01, 0.05, 1.0);
-    //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-   
-   
-    //glMatrixMode(GL_MODELVIEW);
-    //glRotatef(3.0, 3.0, 1.0, 1.0);
-   
+   glClearColor(0.1, 0.01, 0.05, 1.0);
+   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
    SDL_GL_SwapWindow(window);
-   /* Soft renderer
-   if (SDL_MUSTLOCK(surface)) SDL_LockSurface(surface);
-   Uint8 * pixels = surface->pixels;
-   for (int i=0; i < w*h*4; i++) {
-      pixels[i] = (i+t) % 255 *(i % 4);
-   }
-   if (SDL_MUSTLOCK(surface)) SDL_UnlockSurface(surface);
-   
-   SDL_Texture *screenTexture = SDL_CreateTextureFromSurface(renderer, surface);
-
-   SDL_RenderClear(renderer);
-   SDL_RenderCopy(renderer, screenTexture, NULL, NULL);
-   SDL_RenderPresent(renderer);
-   SDL_DestroyTexture(screenTexture);*/
 }
 
 void initOGL(){
@@ -79,23 +59,6 @@ void initOGL(){
    ctx = SDL_GL_CreateContext(window);
    SDL_GL_SetSwapInterval(1);//vsync
 
-   //magic matrix stuff
-  /*
-   glMatrixMode(GL_PROJECTION); 
-   glLoadIdentity();
-   glOrtho(.0, .0, 10.0, 10.0, -20.0, 20.0);//clipping plane?
-   glMatrixMode(GL_MODELVIEW);
-   glLoadIdentity();
-   */
-   //render setting
-   //glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LESS); //Z-Buffer
-   //glShadeModel(GL_SMOOTH);// smooth shading? GL_SMOOT : HGL_FLAT 
-   //keymap init
-
-
-
-
-   //data, remove from loop...
    static float pos[6]={ -.5f,-.5f,.0f,.5f,.5f,-.5f}; //vertex pos x1,y1,x2...
    unsigned int buff;
    glGenBuffers(1, &buff);
