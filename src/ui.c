@@ -5,33 +5,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+typedef struct _Elem{ RECT area; void (*onPress)(struct _Elem *e); void (*onUpdate)(struct _Elem *e); void (*onRender)(struct _Elem *e, Uint32 *pixels); } Elem;
+typedef struct { RECT area; void (*onPress)(); Elem *elems; int numElems; } UiHandler;
 
-typedef struct { RECT area; void (*onPress)(); void (*onUpdate)(); void (*onRender)(Uint32 *pixels); } Button;
-typedef struct { RECT area; void (*onPress)(); Button *buttons; int numButtons; } UiHandler;
 UiHandler *ui=NULL;
-int uiN = 0;
-void uiTick() {
+I uiN = 0;
+
+V uiTick() {
    if (ui == NULL) {return;}
-   FORY(uiN, { FORX(ui[y].numButtons , {
-      if (ui[y].buttons == NULL || ui[y].buttons[x].onUpdate == NULL) {continue;}
-      ui[y].buttons[x].onUpdate(); 
+   FORY(uiN, { FORX(ui[y].numElems , {
+      if (ui[y].elems == NULL || ui[y].elems[x].onUpdate == NULL) {continue;}
+      ui[y].elems[x].onUpdate(&ui[y].elems[x]); 
+   }); });
+}
+V uiRender(Uint32 *p) {
+   if (ui == NULL) {return;}
+   FORY(uiN, { FORX(ui[y].numElems , {
+      if (ui[y].elems == NULL || ui[y].elems[x].onRender== NULL) {continue;}
+      ui[y].elems[x].onRender(&ui[y].elems[x],p); 
    }); });
 }
 
-void uiRender(Uint32 *p) {
-   if (ui == NULL) {return;}
-   FORY(uiN, { FORX(ui[y].numButtons , {
-      if (ui[y].buttons == NULL || ui[y].buttons[x].onRender== NULL) {continue;}
-      ui[y].buttons[x].onRender(p); 
-   }); });
-}
+V uiDestroy(){ /*loop and free all elems and handlers*/ }
+V uiDestroyhandler(int index){ /*destroy a specific handler*/ }
 
-V uiDestroy(){
-   //loop and free all buttons and handlers
-}
-V uiDestroyhandler(int index){
-   //destroy a specific handler
-}
 I initUiHandler(RECT r){
     if (ui == NULL) {
         addTickFunction(uiTick);
@@ -40,30 +37,31 @@ I initUiHandler(RECT r){
     }
     uiN++;
     ui = (UiHandler *)realloc(ui, uiN * sizeof(UiHandler));
-    ui[uiN-1].area = r; 
-    ui[uiN-1].buttons = NULL; 
-    ui[uiN-1].numButtons = 0; 
+    ui[uiN-1].area = r; ui[uiN-1].elems = NULL; ui[uiN-1].numElems = 0; 
     return uiN-1;
 }
 
-I addButton(UiHandler *uh, Button *b) {
-   uh->buttons = (Button *)realloc(uh->buttons, (uh->numButtons + 1) * sizeof(Button));
-   if (uh->buttons != NULL) {
-       uh->buttons[uh->numButtons] = *b;
-       uh->numButtons++;
-       return uh->numButtons;
+I addElem(UiHandler *uh, Elem *b) {
+   uh->elems = (Elem *)realloc(uh->elems, (uh->numElems + 1) * sizeof(Elem));
+   if (uh->elems != NULL) {
+       uh->elems[uh->numElems] = *b;
+       uh->numElems++;
+       return uh->numElems;
    } else { return -1; }
 }
 
-Button *newButton(RECT r, void (*onPress)(), void (*onUpdate)(), void (*onRender)()) {
-    Button *b = (Button *)malloc(sizeof(Button));
+Elem *newElem(RECT r, void (*onPress)(), void (*onUpdate)(), void (*onRender)()) {
+    Elem *b = (Elem *)malloc(sizeof(Elem));
     b->area = r; b->onPress = onPress; b->onUpdate = onUpdate; b->onRender = onRender;
     return b;
 }
 
-V onPressFunction() { printf("Button pressed!\n"); }
-V onUpdateFunction() { printf("Button updated!\n"); }
-V onRenderFunction(Uint32 *pixels) { printf("Button rendered!\n"); }
+V onPressFunction(Elem *e) { printf("Elem pressed!\n"); }
+V onUpdateFunction(Elem *e) { printf("Elem updated!\n"); }
+V onRenderFunction(Elem *e, U32 *pixels) { 
+   printf("%d\n",e->area.w);
+   FORYX(e->area.h, e->area.w, { pixels[(x+e->area.x)+(y+ e->area.y)*w]=0xFF00FF00; })
+}
 
 
 

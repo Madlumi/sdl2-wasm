@@ -14,7 +14,7 @@ void quit(){ SDL_Quit(); running=0; }
 
 RECT MAINUI={0,0,512,512};
 void init(){ keysInit(); renderInit(512,512); initUiHandler(MAINUI);
-    addButton(&ui[0], newButton(MAINUI, *onPressFunction, *onUpdateFunction, *onRenderFunction)) ;
+    addElem(&ui[0], newElem(MAINUI, *onPressFunction, *onUpdateFunction, *onRenderFunction)) ;
 }
 
 void mainLoop(){ events(); tick(); render(); }
