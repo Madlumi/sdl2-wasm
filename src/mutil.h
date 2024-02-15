@@ -9,6 +9,8 @@ typedef void   V;
 typedef char   C;
 typedef char*  S;
 
+typedef struct{int x; int y; int w; int h;}RECT;
+typedef struct{int x; int y;}POINT;
 
 #define CON const
 #define ST static
