@@ -4,10 +4,10 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #endif
-#include "keys.c"
-#include "tick.c"
+#include "keys.h"
+#include "tick.h"
 #include "renderer.h"
-#include "ui.c"
+#include "ui.h"
 int running=1;
 
 void quit(){ SDL_Quit(); running=0; }

@@ -10,18 +10,18 @@
 #endif
 #include <stdbool.h>
 #include <stdlib.h>
-#include "tick.c"
+#include "tick.h"
 #define IN(x,l,h) ((l)<=(x)&&(x)<=(h))
 #include<unistd.h>
 
 #define keyn 512
 #define mkeyn 24
-int KEYS[keyn];
+I KEYS[keyn];
 SDL_Point mpos = {0,0};
-int MKEYS[mkeyn];
-int QUIT=0;
-int mouseWheelMoved=0;
-void events(){
+I MKEYS[mkeyn];
+I QUIT=0;
+I mouseWheelMoved=0;
+V events(){
    SDL_Event e;
    SDL_GetMouseState(&mpos.x, &mpos.y);
    for(int i = 0; i < mkeyn; i++){if(MKEYS[i]>1){MKEYS[i]--;}}
@@ -42,7 +42,7 @@ void events(){
 #endif
 }
 
-void keysInit(){
+V keysInit(){
    addTickFunction(events);
    for(int i = 0; i < 322; i++) { // init them all to false
       KEYS[i] = false;

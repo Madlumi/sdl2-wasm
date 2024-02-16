@@ -1,6 +1,6 @@
 linux:
 	-mkdir out
-	gcc src/main.c `sdl2-config --cflags --libs` -lSDL2_image -lGL -lm -o bp
+	gcc src/*c `sdl2-config --cflags --libs` -lSDL2_image -lGL -lm -o bp
 run: linux
 	./bp
 wasm:

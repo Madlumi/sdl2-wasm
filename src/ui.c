@@ -1,7 +1,7 @@
-#include "mutil.h"
+#include "mutilSDL.h"
 #include "SDL.h"
 #include "renderer.h"
-#include "tick.c"
+#include "tick.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -56,6 +56,7 @@ Elem *newElem(RECT r, void (*onPress)(), void (*onUpdate)(), void (*onRender)())
     return b;
 }
 
+//test functions
 V onPressFunction(Elem *e) { printf("Elem pressed!\n"); }
 V onUpdateFunction(Elem *e) { printf("Elem updated!\n"); }
 V onRenderFunction(Elem *e, U32 *pixels) { 

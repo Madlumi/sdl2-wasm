@@ -1,5 +1,4 @@
 #pragma once
-#include "SDL_stdinc.h"
 #include <stdbool.h>
 
 typedef int    I;
@@ -9,11 +8,7 @@ typedef double D;
 typedef void   V;
 typedef char   C;
 typedef char*  S;
-typedef Uint32 U32;
-
-typedef struct{int x; int y; int w; int h;}RECT;
-typedef struct{int x; int y;}POINT;
-
+#define E extern
 #define CON const
 #define ST static
 #define R return 

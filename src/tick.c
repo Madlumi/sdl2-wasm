@@ -1,5 +1,3 @@
-#ifndef TICK
-#define TICK
 #include "mutil.h"
 #define MAX_TICK_FUNC 10
 typedef void (*tickFunc)(void);
@@ -11,4 +9,3 @@ void tick(){
    FOR(MAX_TICK_FUNC,{ if (tickFuncs[i]) { tickFuncs[i]();}});
 }
 
-#endif
