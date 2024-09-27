@@ -1,0 +1,72 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-o",
+      "bp",
+      "src/keys.c"
+    ],
+    "directory": "/home/madi/proj/sdl2-wasm",
+    "file": "/home/madi/proj/sdl2-wasm/src/keys.c",
+    "output": "/home/madi/proj/sdl2-wasm/bp"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-o",
+      "bp",
+      "src/main.c"
+    ],
+    "directory": "/home/madi/proj/sdl2-wasm",
+    "file": "/home/madi/proj/sdl2-wasm/src/main.c",
+    "output": "/home/madi/proj/sdl2-wasm/bp"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-o",
+      "bp",
+      "src/renderer.c"
+    ],
+    "directory": "/home/madi/proj/sdl2-wasm",
+    "file": "/home/madi/proj/sdl2-wasm/src/renderer.c",
+    "output": "/home/madi/proj/sdl2-wasm/bp"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-o",
+      "bp",
+      "src/tick.c"
+    ],
+    "directory": "/home/madi/proj/sdl2-wasm",
+    "file": "/home/madi/proj/sdl2-wasm/src/tick.c",
+    "output": "/home/madi/proj/sdl2-wasm/bp"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-o",
+      "bp",
+      "src/ui.c"
+    ],
+    "directory": "/home/madi/proj/sdl2-wasm",
+    "file": "/home/madi/proj/sdl2-wasm/src/ui.c",
+    "output": "/home/madi/proj/sdl2-wasm/bp"
+  }
+]

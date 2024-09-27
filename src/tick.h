@@ -1,8 +1,7 @@
-
 #ifndef TICK
 #define TICK
 #include "mutil.h"
 typedef void (*tickFunc)(void);
-void addTickFunction(tickFunc func);
+new_pool_h(tickF, tickFunc);
 void tick();
 #endif

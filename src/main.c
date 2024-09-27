@@ -1,5 +1,3 @@
-#include "mutil.h"
-#include <stdio.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -12,9 +10,10 @@ int running=1;
 
 void quit(){ SDL_Quit(); running=0; }
 
-RECT MAINUI={0,0,512,512};
+RECT MAINUI={50,50,50,50};
 void init(){ keysInit(); renderInit(512,512); initUiHandler(MAINUI);
     addElem(&ui[0], newElem(MAINUI, *onPressFunction, *onUpdateFunction, *onRenderFunction)) ;
+    addElem(&ui[0], newElem((RECT){150,50,50,50}, *onPressFunction, *onUpdateFunction, *onRenderFunction)) ;
 }
 
 void mainLoop(){ events(); tick(); render(); }
