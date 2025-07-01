@@ -8,7 +8,7 @@
 #include "ui.h"
 int running=1;
 
-void quit(){ SDL_Quit(); running=0; }
+void quit(){ renderFree(); SDL_Quit(); running=0; }
 
 RECT MAINUI={50,50,50,50};
 void init(){ keysInit(); renderInit(512,512); initUiHandler(MAINUI);

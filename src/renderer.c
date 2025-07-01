@@ -24,4 +24,17 @@ void render(){
    SDL_DestroyTexture(screenTexture);
 }
 
-
+void renderFree(){
+   if(surface){
+       SDL_FreeSurface(surface);
+       surface = NULL;
+   }
+   if(renderer){
+       SDL_DestroyRenderer(renderer);
+       renderer = NULL;
+   }
+   if(window){
+       SDL_DestroyWindow(window);
+       window = NULL;
+   }
+}
