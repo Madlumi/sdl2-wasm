@@ -6,4 +6,5 @@
 
 typedef Uint32 U32;
 typedef SDL_Rect RECT;
+typedef SDL_Point V2;
 typedef SDL_Point POINT;

@@ -26,18 +26,21 @@ static const int ground_y = (MAP_H - 1) * TILE;
 static float camera_x = 0.0f;
 static Uint32 start_ticks = 0;
 
+   D Timer = 100;
 typedef struct {
     float x, y;
     float vx;
     int w, h;
 } Enemy;
 
+//magic number bad!!!
 static Enemy enemies[8];
 static int enemy_count = 0;
 
-static void gameTickInternal(void) {
-    if (Held(INP_A)) player.vx = -SPEED; 
-    else if (Held(INP_D)) player.vx = SPEED; 
+
+static void gameTickInternal(double dt) {
+    if (Held(INP_A)){ player.vx = -SPEED; }
+    else if (Held(INP_D)){ player.vx = SPEED; }
     else player.vx = 0;
 
     if (Pressed(INP_W) && player.onGround) {
@@ -45,10 +48,9 @@ static void gameTickInternal(void) {
         player.onGround = 0;
     }
 
-    player.vy += GRAVITY;
-
-    player.x += player.vx;
-    player.y += player.vy;
+    player.vy += GRAVITY * dt;
+    player.x += player.vx * dt;
+    player.y += player.vy *dt;
 
     if (player.y + player.h > ground_y) {
         player.y = ground_y - player.h;
@@ -94,45 +96,49 @@ static void gameTickInternal(void) {
     if(camera_x < 0) camera_x = 0;
     int maxCam = MAP_W*TILE - w;
     if(camera_x > maxCam) camera_x = maxCam;
+Timer-=dt;
 }
 
 static void gameRenderInternal(SDL_Renderer *r) {
-    SDL_Rect bgRect = {(int)-camera_x, 0, MAP_W * TILE, MAP_H * TILE};
+    RECT bgRect = {(int)-camera_x, 0, MAP_W * TILE, MAP_H * TILE};
     drawTexture("bg", NULL, &bgRect);
 
     for (int i = 0; i < MAP_W; ++i) {
-        SDL_Rect d = {i * TILE - (int)camera_x, ground_y, TILE, TILE};
+        RECT d = {i * TILE - (int)camera_x, ground_y, TILE, TILE};
         drawTexture("ground", NULL, &d);
     }
 
     for (int i = 0; i < block_count; ++i) {
-        SDL_Rect d = {blocks[i].x - (int)camera_x, blocks[i].y, blocks[i].w, blocks[i].h};
+        RECT d = {blocks[i].x - (int)camera_x, blocks[i].y, blocks[i].w, blocks[i].h};
         drawTexture("block", NULL, &d);
     }
 
     for(int i=0;i<enemy_count;i++){
-        SDL_Rect d = {(int)enemies[i].x - (int)camera_x, (int)enemies[i].y, enemies[i].w, enemies[i].h};
+        RECT d = {(int)enemies[i].x - (int)camera_x, (int)enemies[i].y, enemies[i].w, enemies[i].h};
         drawTexture("block", NULL, &d);
     }
 
-    SDL_Rect p = {(int)player.x - (int)camera_x, (int)player.y, player.w, player.h};
+   //make camera be offset in render instead so we dont need to define like this. add a static position bool
+    RECT p = {(int)player.x - (int)camera_x, (int)player.y, player.w, player.h};
     drawTexture("player", NULL, &p);
 
-    char buf[32];
-    float secs = (SDL_GetTicks() - start_ticks)/1000.0f;
-    snprintf(buf, sizeof(buf), "%.1fs", secs);
-    drawText("default_font", buf, 10, 10, (SDL_Color){255,255,255,255});
+    drawText("default_font", 10, 10, (SDL_Color){255,255,255,255}, " %.1f", Timer);
+   //make drawText do the sprintf stuff
 }
-
-void gameInit() {
-    player.x = 64;
-    player.y = (MAP_H - 2) * TILE;
+void spawnPlayer(V2  pos){
+    player.x = pos.x;
+    player.y = pos.y;
     player.w = TILE;
     player.h = TILE;
     player.vx = 0;
     player.vy = 0;
     player.onGround = 0;
+    camera_x = 0;
+}
+void loadLevel(int level){
 
+   if(level==0){
+    Timer = 100;
     block_count = 5;
     blocks[0] = (SDL_Rect){5 * TILE, (MAP_H - 3) * TILE, TILE, TILE};
     blocks[1] = (SDL_Rect){12 * TILE, (MAP_H - 4) * TILE, TILE, TILE};
@@ -143,10 +149,12 @@ void gameInit() {
     enemy_count = 2;
     enemies[0] = (Enemy){15 * TILE, (MAP_H - 2) * TILE, 1.0f, TILE, TILE};
     enemies[1] = (Enemy){35 * TILE, (MAP_H - 2) * TILE, -1.2f, TILE, TILE};
+   }
+   spawnPlayer((V2){64,(MAP_H - 2) * TILE});
+}
 
-    start_ticks = SDL_GetTicks();
-    camera_x = 0;
-
-    tickF_add(gameTickInternal);
-    renderF_add(gameRenderInternal);
+void gameInit() {
+   loadLevel(0);
+   tickF_add(gameTickInternal);
+   renderF_add(gameRenderInternal);
 }
