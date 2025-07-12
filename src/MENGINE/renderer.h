@@ -4,8 +4,9 @@
 #include "mutil.h"
 E I w; 
 E I h;
-E SDL_Window *window; E SDL_Renderer *renderer; E SDL_Surface *surface;
-typedef void (*RenderFunction)(Uint32*);
+E SDL_Window *window;
+E SDL_Renderer *renderer;
+typedef void (*RenderFunction)(SDL_Renderer*);
 new_pool_h(renderF, RenderFunction);
 
 

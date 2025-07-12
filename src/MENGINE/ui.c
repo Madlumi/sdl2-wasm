@@ -3,12 +3,11 @@
 #include "renderer.h"
 #include "tick.h"
 #include "keys.h"
+#include "ui.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <SDL.h>
-typedef struct _Elem{ RECT area; void (*onPress)(struct _Elem *e); void (*onUpdate)(struct _Elem *e); void (*onRender)(struct _Elem *e, Uint32 *pixels); } Elem;
-typedef struct { RECT area; void (*onPress)(); Elem *elems; int numElems; } UiHandler;
 
 UiHandler *ui=NULL;
 I uiN = 0;
@@ -23,11 +22,11 @@ V uiTick() {
       if( INSQ( mpos , ui[y].elems[x].area) && Pressed(INP_CLICK)) { ui[y].elems[x].onPress(&ui[y].elems[x]); }
    }); });
 }
-V uiRender(Uint32 *p) {
+V uiRender(SDL_Renderer *r) {
    if (ui == NULL) {return;}
    FORY(uiN, { FORX(ui[y].numElems , {
       if (ui[y].elems == NULL || ui[y].elems[x].onRender== NULL) {continue;}
-      ui[y].elems[x].onRender(&ui[y].elems[x],p); 
+      ui[y].elems[x].onRender(&ui[y].elems[x],r);
    }); });
 }
 
@@ -64,8 +63,8 @@ Elem *newElem(RECT r, void (*onPress)(), void (*onUpdate)(), void (*onRender)())
 //test functions
 V onPressFunction(Elem *e) { printf("Elem pressed!\n"); }
 V onUpdateFunction(Elem *e) { ; }
-V onRenderFunction(Elem *e, U32 *pixels) {
-   FORYX(e->area.h, e->area.w, { pixels[(x+e->area.x)+(y+ e->area.y)*w]=0xFF00FF00; })
+V onRenderFunction(Elem *e, SDL_Renderer *r) {
+   (void)r;
    SDL_Rect dst = {e->area.x, e->area.y, e->area.w, e->area.h};
    drawTexture("noise_a", NULL, &dst);
 }
