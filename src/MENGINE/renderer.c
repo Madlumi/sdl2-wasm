@@ -3,6 +3,7 @@
 #include "mutil.h"
 #include "renderer.h"
 #include "res.h"
+#include <SDL_ttf.h>
 int w=512; int h=125;
 SDL_Window *window;
 SDL_Renderer *renderer;
@@ -25,6 +26,19 @@ void drawTexture(const char *name, SDL_Rect *src, SDL_Rect *dst){
    if(tex){
        SDL_RenderCopy(renderer, tex, src, dst);
    }
+}
+
+void drawText(const char *fontName, const char *text, int x, int y, SDL_Color c){
+   TTF_Font *font = resGetFont(fontName);
+   if(!font){ return; }
+   SDL_Surface *s = TTF_RenderUTF8_Blended(font, text, c);
+   if(!s){ return; }
+   SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
+   if(!t){ SDL_FreeSurface(s); return; }
+   SDL_Rect d = {x, y, s->w, s->h};
+   SDL_RenderCopy(renderer, t, NULL, &d);
+   SDL_DestroyTexture(t);
+   SDL_FreeSurface(s);
 }
 
 void renderFree(){
