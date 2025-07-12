@@ -16,6 +16,8 @@ void init(){ keysInit(); renderInit(512,512); initUiHandler(MAINUI);
     addElem(&ui[0], newElem((RECT){150,50,50,50}, *onPressFunction, *onUpdateFunction, *onRenderFunction)) ;
 }
 
+
+
 void mainLoop(){ events(); tick(); render(); }
 
 int main(int argc, char* argv[]) {
@@ -25,4 +27,16 @@ int main(int argc, char* argv[]) {
    #else
    while(running) { mainLoop(); SDL_Delay(16); if(QUIT){quit();}}
    #endif 
+}
+
+
+
+void test(){
+   
+}
+void testRender(){
+
+}
+void testTick(D dt){
+
 }
