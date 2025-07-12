@@ -51,7 +51,8 @@ void RemapKey(enum KEYMAP k, int newKey, int bindIndex) {
 
 
 
-V events(){
+V events(D dt){
+   (void)dt;
    #define sc e.key.keysym.scancode
    #define bc e.button.button
    SDL_Event e;
@@ -75,7 +76,6 @@ V events(){
 }
 
 V keysInit(){
-   tickF_add(events);
    for(I i = 0; i < keyt; i++) {
       KEYS[i] = 0;
    }

@@ -8,9 +8,9 @@
 #define TILE 32
 #define MAP_W 64
 #define MAP_H 16
-#define GRAVITY 0.5f
-#define SPEED 2.0f
-#define JUMP_VEL 10.0f
+#define GRAVITY 10*64
+#define SPEED 300.0f
+#define JUMP_VEL 300.0f
 
 typedef struct {
     float x, y;
@@ -96,31 +96,32 @@ static void gameTickInternal(double dt) {
     if(camera_x < 0) camera_x = 0;
     int maxCam = MAP_W*TILE - w;
     if(camera_x > maxCam) camera_x = maxCam;
+    renderSetCamera((int)camera_x,0);
 Timer-=dt;
 }
 
 static void gameRenderInternal(SDL_Renderer *r) {
-    RECT bgRect = {(int)-camera_x, 0, MAP_W * TILE, MAP_H * TILE};
-    drawTexture("bg", NULL, &bgRect);
+    RECT bgRect = {0, 0, MAP_W * TILE, MAP_H * TILE};
+    drawTexture("bg", NULL, &bgRect, 0);
 
     for (int i = 0; i < MAP_W; ++i) {
-        RECT d = {i * TILE - (int)camera_x, ground_y, TILE, TILE};
-        drawTexture("ground", NULL, &d);
+        RECT d = {i * TILE, ground_y, TILE, TILE};
+        drawTexture("ground", NULL, &d, 0);
     }
 
     for (int i = 0; i < block_count; ++i) {
-        RECT d = {blocks[i].x - (int)camera_x, blocks[i].y, blocks[i].w, blocks[i].h};
-        drawTexture("block", NULL, &d);
+        RECT d = {blocks[i].x, blocks[i].y, blocks[i].w, blocks[i].h};
+        drawTexture("block", NULL, &d, 0);
     }
 
     for(int i=0;i<enemy_count;i++){
-        RECT d = {(int)enemies[i].x - (int)camera_x, (int)enemies[i].y, enemies[i].w, enemies[i].h};
-        drawTexture("block", NULL, &d);
+        RECT d = {(int)enemies[i].x, (int)enemies[i].y, enemies[i].w, enemies[i].h};
+        drawTexture("block", NULL, &d, 0);
     }
 
    //make camera be offset in render instead so we dont need to define like this. add a static position bool
-    RECT p = {(int)player.x - (int)camera_x, (int)player.y, player.w, player.h};
-    drawTexture("player", NULL, &p);
+    RECT p = {(int)player.x, (int)player.y, player.w, player.h};
+    drawTexture("player", NULL, &p, 0);
 
     drawText("default_font", 10, 10, (SDL_Color){255,255,255,255}, " %.1f", Timer);
    //make drawText do the sprintf stuff

@@ -19,7 +19,7 @@ void init(){
 
 
 
-void mainLoop(){ events(); tick(); render(); }
+void mainLoop(){ events(0); tick(); render(); }
 
 int main(int argc, char* argv[]) {
    init();

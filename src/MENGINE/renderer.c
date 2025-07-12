@@ -4,9 +4,11 @@
 #include "renderer.h"
 #include "res.h"
 #include <SDL_ttf.h>
+#include <stdarg.h>
 int w=512; int h=125;
 SDL_Window *window;
 SDL_Renderer *renderer;
+int camX=0; int camY=0;
 new_pool(renderF, RenderFunction);
 void renderInit(CON I W, CON I H){
    w=W;h=H;
@@ -15,23 +17,35 @@ void renderInit(CON I W, CON I H){
    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
    resLoadAll(renderer);
 }
+
+void renderSetCamera(I x, I y){
+   camX = x;
+   camY = y;
+}
 void render(){
    SDL_RenderClear(renderer);
    FOR( renderF_num,{ renderF_pool[i](renderer); });
    SDL_RenderPresent(renderer);
 }
 
-void drawTexture(const char *name, SDL_Rect *src, SDL_Rect *dst){
+void drawTexture(const char *name, SDL_Rect *src, SDL_Rect *dst, B staticPos){
    SDL_Texture *tex = resGetTexture(name);
    if(tex){
-       SDL_RenderCopy(renderer, tex, src, dst);
+       SDL_Rect d = *dst;
+       if(!staticPos){ d.x -= camX; d.y -= camY; }
+       SDL_RenderCopy(renderer, tex, src, &d);
    }
 }
 
-void drawText(const char *fontName, const char *text, int x, int y, SDL_Color c){
+void drawText(const char *fontName, I x, I y, SDL_Color c, const char *fmt, ...){
    TTF_Font *font = resGetFont(fontName);
    if(!font){ return; }
-   SDL_Surface *s = TTF_RenderUTF8_Blended(font, text, c);
+   char buf[256];
+   va_list va;
+   va_start(va, fmt);
+   vsnprintf(buf, sizeof(buf), fmt, va);
+   va_end(va);
+   SDL_Surface *s = TTF_RenderUTF8_Blended(font, buf, c);
    if(!s){ return; }
    SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
    if(!t){ SDL_FreeSurface(s); return; }

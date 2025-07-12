@@ -12,7 +12,8 @@
 UiHandler *ui=NULL;
 I uiN = 0;
 
-V uiTick() {
+V uiTick(D dt) {
+   (void)dt;
    if (ui == NULL) {return;}
    FORY(uiN, { FORX(ui[y].numElems , {
       if (ui[y].elems == NULL || ui[y].elems[x].onUpdate == NULL) {continue;}
@@ -66,7 +67,7 @@ V onUpdateFunction(Elem *e) { ; }
 V onRenderFunction(Elem *e, SDL_Renderer *r) {
    (void)r;
    SDL_Rect dst = {e->area.x, e->area.y, e->area.w, e->area.h};
-   drawTexture("noise_a", NULL, &dst);
+   drawTexture("noise_a", NULL, &dst, 1);
 }
 
 
