@@ -1,0 +1,11 @@
+Oldschool PC Font Pack
+Font: Mx437 EverexME 5x8
+Author: VileR
+Source: https://int10h.org/oldschool-pc-fonts/
+License: Creative Commons Attribution-ShareAlike 4.0 International
+
+No rights are claimed to the original raster binary data. This TrueType remake is licensed under CC BY-SA 4.0 and may be shared or adapted for any purpose as long as proper attribution is given and adaptations are distributed under a compatible license. No warranty is provided.
+
+Preferred attribution:
+  Fonts by VileR, licensed under CC BY-SA 4.0
+  https://creativecommons.org/licenses/by-sa/4.0/
