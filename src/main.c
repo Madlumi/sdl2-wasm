@@ -6,18 +6,15 @@
 #include "tick.h"
 #include "renderer.h"
 #include "res.h"
-#include "ui.h"
+#include "EGAME/game.h"
 int running=1;
 
 void quit(){ renderFree(); SDL_Quit(); running=0; }
 
-RECT MAINUI={50,50,50,50};
-void init(){ 
-   keysInit(); 
+void init(){
+   keysInit();
    renderInit(512,512);
-   initUiHandler(MAINUI);
-   addElem(&ui[0], newElem(MAINUI, *onPressFunction, *onUpdateFunction, *onRenderFunction)) ;
-   addElem(&ui[0], newElem((RECT){150,50,50,50}, *onPressFunction, *onUpdateFunction, *onRenderFunction)) ;
+   gameInit();
 }
 
 
