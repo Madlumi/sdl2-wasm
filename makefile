@@ -1,5 +1,5 @@
 linux:
-	-mkdir out
+	-mkdir -p out
 	gcc -Isrc/MENGINE src/*.c src/MENGINE/*.c `sdl2-config --cflags --libs` -lSDL2_image -lGL -lm -o bp
 run: linux
 	./bp
