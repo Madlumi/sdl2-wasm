@@ -64,8 +64,10 @@ Elem *newElem(RECT r, void (*onPress)(), void (*onUpdate)(), void (*onRender)())
 //test functions
 V onPressFunction(Elem *e) { printf("Elem pressed!\n"); }
 V onUpdateFunction(Elem *e) { ; }
-V onRenderFunction(Elem *e, U32 *pixels) { 
+V onRenderFunction(Elem *e, U32 *pixels) {
    FORYX(e->area.h, e->area.w, { pixels[(x+e->area.x)+(y+ e->area.y)*w]=0xFF00FF00; })
+   SDL_Rect dst = {e->area.x, e->area.y, e->area.w, e->area.h};
+   drawTexture("noise_a", NULL, &dst);
 }
 
 

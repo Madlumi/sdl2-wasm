@@ -3,20 +3,7 @@
     "arguments": [
       "/usr/bin/gcc",
       "-c",
-      "-I/usr/include/SDL2",
-      "-D_REENTRANT",
-      "-o",
-      "bp",
-      "src/keys.c"
-    ],
-    "directory": "/home/madi/proj/sdl2-wasm",
-    "file": "/home/madi/proj/sdl2-wasm/src/keys.c",
-    "output": "/home/madi/proj/sdl2-wasm/bp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/gcc",
-      "-c",
+      "-Isrc/MENGINE",
       "-I/usr/include/SDL2",
       "-D_REENTRANT",
       "-o",
@@ -31,42 +18,75 @@
     "arguments": [
       "/usr/bin/gcc",
       "-c",
+      "-Isrc/MENGINE",
       "-I/usr/include/SDL2",
       "-D_REENTRANT",
       "-o",
       "bp",
-      "src/renderer.c"
+      "src/MENGINE/keys.c"
     ],
     "directory": "/home/madi/proj/sdl2-wasm",
-    "file": "/home/madi/proj/sdl2-wasm/src/renderer.c",
+    "file": "/home/madi/proj/sdl2-wasm/src/MENGINE/keys.c",
     "output": "/home/madi/proj/sdl2-wasm/bp"
   },
   {
     "arguments": [
       "/usr/bin/gcc",
       "-c",
+      "-Isrc/MENGINE",
       "-I/usr/include/SDL2",
       "-D_REENTRANT",
       "-o",
       "bp",
-      "src/tick.c"
+      "src/MENGINE/renderer.c"
     ],
     "directory": "/home/madi/proj/sdl2-wasm",
-    "file": "/home/madi/proj/sdl2-wasm/src/tick.c",
+    "file": "/home/madi/proj/sdl2-wasm/src/MENGINE/renderer.c",
     "output": "/home/madi/proj/sdl2-wasm/bp"
   },
   {
     "arguments": [
       "/usr/bin/gcc",
       "-c",
+      "-Isrc/MENGINE",
       "-I/usr/include/SDL2",
       "-D_REENTRANT",
       "-o",
       "bp",
-      "src/ui.c"
+      "src/MENGINE/res.c"
     ],
     "directory": "/home/madi/proj/sdl2-wasm",
-    "file": "/home/madi/proj/sdl2-wasm/src/ui.c",
+    "file": "/home/madi/proj/sdl2-wasm/src/MENGINE/res.c",
+    "output": "/home/madi/proj/sdl2-wasm/bp"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Isrc/MENGINE",
+      "-I/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-o",
+      "bp",
+      "src/MENGINE/tick.c"
+    ],
+    "directory": "/home/madi/proj/sdl2-wasm",
+    "file": "/home/madi/proj/sdl2-wasm/src/MENGINE/tick.c",
+    "output": "/home/madi/proj/sdl2-wasm/bp"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Isrc/MENGINE",
+      "-I/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-o",
+      "bp",
+      "src/MENGINE/ui.c"
+    ],
+    "directory": "/home/madi/proj/sdl2-wasm",
+    "file": "/home/madi/proj/sdl2-wasm/src/MENGINE/ui.c",
     "output": "/home/madi/proj/sdl2-wasm/bp"
   }
 ]

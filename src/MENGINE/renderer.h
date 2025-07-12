@@ -13,5 +13,6 @@ V renderInit(CON I W, CON I H);
 
 V renderFree();
 V render();
+V drawTexture(const char *name, SDL_Rect *src, SDL_Rect *dst);
 #endif
 
