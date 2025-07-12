@@ -17,6 +17,7 @@ V renderSetCamera(I x, I y);
 V renderFree();
 V render();
 V drawTexture(const char *name, SDL_Rect *src, SDL_Rect *dst, B staticPos);
+V drawTexturePal(const char *name, SDL_Rect *src, SDL_Rect *dst, B staticPos, const char *palName);
 V drawText(const char *fontName, I x, I y, SDL_Color c, const char *fmt, ...);
 #endif
 

@@ -106,22 +106,22 @@ static void gameRenderInternal(SDL_Renderer *r) {
 
     for (int i = 0; i < MAP_W; ++i) {
         RECT d = {i * TILE, ground_y, TILE, TILE};
-        drawTexture("ground", NULL, &d, 0);
+        drawTexturePal("ground", NULL, &d, 0, "block_pal");
     }
 
     for (int i = 0; i < block_count; ++i) {
         RECT d = {blocks[i].x, blocks[i].y, blocks[i].w, blocks[i].h};
-        drawTexture("block", NULL, &d, 0);
+        drawTexturePal("block", NULL, &d, 0, "block_pal");
     }
 
     for(int i=0;i<enemy_count;i++){
         RECT d = {(int)enemies[i].x, (int)enemies[i].y, enemies[i].w, enemies[i].h};
-        drawTexture("block", NULL, &d, 0);
+        drawTexturePal("block", NULL, &d, 0, "enemy_pal");
     }
 
    //make camera be offset in render instead so we dont need to define like this. add a static position bool
     RECT p = {(int)player.x, (int)player.y, player.w, player.h};
-    drawTexture("player", NULL, &p, 0);
+    drawTexturePal("player", NULL, &p, 0, "player_pal");
 
     drawText("default_font", 10, 10, (SDL_Color){255,255,255,255}, " %.1f", Timer);
    //make drawText do the sprintf stuff
