@@ -2,6 +2,7 @@
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
 #include "../MENGINE/res.h"
+#include "../MENGINE/keys.h"
 #include <SDL.h>
 
 // Render a texture-based island scene on a blue ocean with one palm tree.
@@ -12,8 +13,6 @@ static void gameTick(double dt) {
 }
 
 static void gameRender(SDL_Renderer *r) {
-    (void)r; // drawTexture uses the global renderer
-
     int tileW, tileH;
     SDL_Texture *waterTex = resGetTexture("water");
     SDL_Texture *sandTex = resGetTexture("sand");
@@ -22,6 +21,9 @@ static void gameRender(SDL_Renderer *r) {
     int tilesX = (w + tileW - 1) / tileW;
     int tilesY = (h + tileH - 1) / tileH;
     const float radius = 3.5f; // base radius in tiles for island
+
+    int hoverX = mpos.x / tileW;
+    int hoverY = mpos.y / tileH;
 
     for (int ty = 0; ty < tilesY; ty++) {
         for (int tx = 0; tx < tilesX; tx++) {
@@ -41,6 +43,10 @@ static void gameRender(SDL_Renderer *r) {
             SDL_SetTextureColorMod(tex, shade, shade, shade);
             SDL_Rect dst = { tx * tileW, ty * tileH, tileW, tileH };
             drawTexture(tex == sandTex ? "sand" : "water", NULL, &dst, 1);
+            if (tx == hoverX && ty == hoverY) {
+                SDL_SetRenderDrawColor(r, 255, 255, 255, 80);
+                SDL_RenderFillRect(r, &dst);
+            }
         }
     }
 
