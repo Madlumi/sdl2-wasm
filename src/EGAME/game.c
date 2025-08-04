@@ -5,7 +5,9 @@
 #include "../MENGINE/keys.h"
 #include "../MENGINE/ui.h"
 #include <SDL.h>
+#include <SDL_ttf.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 // Tile types for the simple island editor
 enum {
@@ -36,6 +38,8 @@ typedef struct {
 } Tile;
 
 static Tile *tiles; // 2D array flattened: tiles[y * tilesX + x]
+
+static int coconutCount = 0;
 
 typedef struct {
     Elem base;
@@ -124,6 +128,12 @@ static void gameTick(double dt) {
             } else if (t->obj == OBJ_SAPLING) {
                 t->timer += dt;
                 if (t->timer >= 1) { t->obj = OBJ_TREE; t->timer = 0; }
+            } else if (t->obj == OBJ_TREE) {
+                t->timer += dt;
+                if (t->timer >= 1) {
+                    coconutCount++;
+                    t->timer -= 1;
+                }
             } else if (t->obj == OBJ_WITHER) {
                 t->obj = OBJ_NONE;
                 t->timer = 0;
@@ -216,6 +226,27 @@ static void gameRender(SDL_Renderer *r) {
     }
     SDL_SetTextureColorMod(waterTex, 255, 255, 255);
     SDL_SetTextureColorMod(sandTex, 255, 255, 255);
+
+    SDL_Texture *cocoTex = resGetTexture("coconut");
+    if (cocoTex) {
+        int iconW, iconH;
+        SDL_QueryTexture(cocoTex, NULL, NULL, &iconW, &iconH);
+
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", coconutCount);
+
+        TTF_Font *font = resGetFont("default_font");
+        int textW = 0, textH = 0;
+        if (font) {
+            TTF_SizeUTF8(font, buf, &textW, &textH);
+        }
+
+        SDL_Rect iconDst = { w - iconW - textW - 20, 10, iconW, iconH };
+        SDL_RenderCopy(r, cocoTex, NULL, &iconDst);
+
+        SDL_Color white = {255, 255, 255, 255};
+        drawText("default_font", iconDst.x + iconW + 5, iconDst.y + (iconH - textH) / 2, white, "%s", buf);
+    }
 }
 
 void gameInit() {
@@ -224,6 +255,7 @@ void gameInit() {
     tilesX = (w + tileW - 1) / tileW;
     tilesY = (h + tileH - 1) / tileH;
     tiles = malloc(sizeof(Tile) * tilesX * tilesY);
+    coconutCount = 0;
     const float radius = 3.5f;
     for (int ty = 0; ty < tilesY; ty++) {
         for (int tx = 0; tx < tilesX; tx++) {
