@@ -112,13 +112,21 @@ static void gameTick(double dt) {
     int ty = mpos.y / tileH;
     if (tx >= 0 && tx < tilesX && ty >= 0 && ty < tilesY) {
         if (Held(INP_LCLICK)) {
-            tiles[ty * tilesX + tx].type = currentTile;
+            Tile *t = &tiles[ty * tilesX + tx];
+            if (currentTile == TILE_GRASS) {
+                if (t->type != TILE_GRASS && coconutCount >= 5) {
+                    coconutCount -= 5;
+                    t->type = TILE_GRASS;
+                }
+            } else {
+                t->type = currentTile;
+            }
         }
     }
 
     for (int i = 0; i < tilesX * tilesY; i++) {
         Tile *t = &tiles[i];
-        if (t->type == TILE_GRASS) {
+        if (t->type == TILE_GRASS || t->type == TILE_SAND) {
             if (t->obj == OBJ_NONE) {
                 t->obj = OBJ_COCONUT;
                 t->timer = 0;
@@ -256,19 +264,20 @@ void gameInit() {
     tilesY = (h + tileH - 1) / tileH;
     tiles = malloc(sizeof(Tile) * tilesX * tilesY);
     coconutCount = 0;
-    const float radius = 3.5f;
     for (int ty = 0; ty < tilesY; ty++) {
         for (int tx = 0; tx < tilesX; tx++) {
-            float dx = tx - tilesX / 2.0f + 0.5f;
-            float dy = ty - tilesY / 2.0f + 0.5f;
-            float noise = ((tx * 7 + ty * 3) % 3) * 0.3f;
-            float effectiveRadius = radius - noise;
             Tile *t = &tiles[ty * tilesX + tx];
-            t->type = (dx * dx + dy * dy <= effectiveRadius * effectiveRadius) ? TILE_SAND : TILE_WATER;
+            t->type = TILE_WATER;
             t->obj = OBJ_NONE;
             t->timer = 0;
         }
     }
+    int centerX = tilesX / 2;
+    int centerY = tilesY / 2;
+    Tile *center = &tiles[centerY * tilesX + centerX];
+    center->type = TILE_SAND;
+    center->obj = OBJ_TREE;
+    center->timer = 0;
 
     tickF_add(gameTick);
     renderF_add(gameRender);
