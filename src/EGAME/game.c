@@ -17,10 +17,25 @@ enum {
     TILE_TOTAL
 };
 
+enum {
+    OBJ_NONE = 0,
+    OBJ_COCONUT,
+    OBJ_SAPLING,
+    OBJ_TREE,
+    OBJ_WITHER
+};
+
 static int currentTile = TILE_SAND;
 static int tileW, tileH;
 static int tilesX, tilesY;
-static unsigned char *tiles; // 2D array flattened: tiles[y * tilesX + x]
+
+typedef struct {
+    unsigned char type;
+    unsigned char obj;
+    double timer;
+} Tile;
+
+static Tile *tiles; // 2D array flattened: tiles[y * tilesX + x]
 
 typedef struct {
     Elem base;
@@ -89,12 +104,38 @@ static TileButton *newTileButton(RECT area, int tileType, const char *label) {
 }
 
 static void gameTick(double dt) {
-    (void)dt;
     int tx = mpos.x / tileW;
     int ty = mpos.y / tileH;
     if (tx >= 0 && tx < tilesX && ty >= 0 && ty < tilesY) {
         if (Held(INP_LCLICK)) {
-            tiles[ty * tilesX + tx] = currentTile;
+            tiles[ty * tilesX + tx].type = currentTile;
+        }
+    }
+
+    for (int i = 0; i < tilesX * tilesY; i++) {
+        Tile *t = &tiles[i];
+        if (t->type == TILE_GRASS) {
+            if (t->obj == OBJ_NONE) {
+                t->obj = OBJ_COCONUT;
+                t->timer = 0;
+            } else if (t->obj == OBJ_COCONUT) {
+                t->timer += dt;
+                if (t->timer >= 1) { t->obj = OBJ_SAPLING; t->timer = 0; }
+            } else if (t->obj == OBJ_SAPLING) {
+                t->timer += dt;
+                if (t->timer >= 1) { t->obj = OBJ_TREE; t->timer = 0; }
+            } else if (t->obj == OBJ_WITHER) {
+                t->obj = OBJ_NONE;
+                t->timer = 0;
+            }
+        } else {
+            if (t->obj == OBJ_COCONUT || t->obj == OBJ_SAPLING || t->obj == OBJ_TREE) {
+                t->obj = OBJ_WITHER;
+                t->timer = 0;
+            } else if (t->obj == OBJ_WITHER) {
+                t->timer += dt;
+                if (t->timer >= 1) { t->obj = OBJ_NONE; t->timer = 0; }
+            }
         }
     }
 }
@@ -106,9 +147,14 @@ static void gameRender(SDL_Renderer *r) {
     int hoverX = mpos.x / tileW;
     int hoverY = mpos.y / tileH;
 
+    SDL_Texture *palmTex = resGetTexture("palm");
+    int palmW, palmH;
+    SDL_QueryTexture(palmTex, NULL, NULL, &palmW, &palmH);
+
     for (int ty = 0; ty < tilesY; ty++) {
         for (int tx = 0; tx < tilesX; tx++) {
-            unsigned char t = tiles[ty * tilesX + tx];
+            Tile *tile = &tiles[ty * tilesX + tx];
+            unsigned char t = tile->type;
             SDL_Texture *tex = (t == TILE_WATER) ? waterTex : sandTex;
             int baseShade = 200;
             Uint8 baseR = 255, baseG = 255, baseB = 255;
@@ -132,17 +178,44 @@ static void gameRender(SDL_Renderer *r) {
                 SDL_SetRenderDrawColor(r, 255, 255, 255, 80);
                 SDL_RenderFillRect(r, &dst);
             }
+
+            SDL_Rect objDst;
+            switch (tile->obj) {
+                case OBJ_COCONUT:
+                    objDst.w = palmW / 4;
+                    objDst.h = palmH / 4;
+                    objDst.x = dst.x + tileW / 2 - objDst.w / 2;
+                    objDst.y = dst.y + tileH / 2 - objDst.h / 2;
+                    SDL_SetTextureColorMod(palmTex, 150, 75, 0);
+                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
+                    SDL_SetTextureColorMod(palmTex, 255, 255, 255);
+                    break;
+                case OBJ_SAPLING:
+                    objDst.w = palmW / 2;
+                    objDst.h = palmH / 2;
+                    objDst.x = dst.x + tileW / 2 - objDst.w / 2;
+                    objDst.y = dst.y + tileH / 2 - objDst.h / 2;
+                    SDL_SetTextureColorMod(palmTex, 50, 200, 50);
+                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
+                    SDL_SetTextureColorMod(palmTex, 255, 255, 255);
+                    break;
+                case OBJ_TREE:
+                    objDst = (SDL_Rect){ dst.x + tileW / 2 - palmW / 2, dst.y + tileH / 2 - palmH / 2, palmW, palmH };
+                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
+                    break;
+                case OBJ_WITHER:
+                    objDst = (SDL_Rect){ dst.x + tileW / 2 - palmW / 2, dst.y + tileH / 2 - palmH / 2, palmW, palmH };
+                    SDL_SetTextureColorMod(palmTex, 100, 100, 100);
+                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
+                    SDL_SetTextureColorMod(palmTex, 255, 255, 255);
+                    break;
+                default:
+                    break;
+            }
         }
     }
-
     SDL_SetTextureColorMod(waterTex, 255, 255, 255);
     SDL_SetTextureColorMod(sandTex, 255, 255, 255);
-
-    int palmW, palmH;
-    SDL_Texture *palmTex = resGetTexture("palm");
-    SDL_QueryTexture(palmTex, NULL, NULL, &palmW, &palmH);
-    SDL_Rect palmDst = { w / 2 - palmW / 2, h / 2 - palmH / 2, palmW, palmH };
-    drawTexture("palm", NULL, &palmDst, 1);
 }
 
 void gameInit() {
@@ -150,7 +223,7 @@ void gameInit() {
     SDL_QueryTexture(waterTex, NULL, NULL, &tileW, &tileH);
     tilesX = (w + tileW - 1) / tileW;
     tilesY = (h + tileH - 1) / tileH;
-    tiles = malloc(tilesX * tilesY);
+    tiles = malloc(sizeof(Tile) * tilesX * tilesY);
     const float radius = 3.5f;
     for (int ty = 0; ty < tilesY; ty++) {
         for (int tx = 0; tx < tilesX; tx++) {
@@ -158,7 +231,10 @@ void gameInit() {
             float dy = ty - tilesY / 2.0f + 0.5f;
             float noise = ((tx * 7 + ty * 3) % 3) * 0.3f;
             float effectiveRadius = radius - noise;
-            tiles[ty * tilesX + tx] = (dx * dx + dy * dy <= effectiveRadius * effectiveRadius) ? TILE_SAND : TILE_WATER;
+            Tile *t = &tiles[ty * tilesX + tx];
+            t->type = (dx * dx + dy * dy <= effectiveRadius * effectiveRadius) ? TILE_SAND : TILE_WATER;
+            t->obj = OBJ_NONE;
+            t->timer = 0;
         }
     }
 
