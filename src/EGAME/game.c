@@ -1,161 +1,63 @@
 #include "game.h"
 #include "../MENGINE/renderer.h"
-#include "../MENGINE/keys.h"
 #include "../MENGINE/tick.h"
+#include "../MENGINE/res.h"
 #include <SDL.h>
-#include <stdio.h>
 
-#define TILE 32
-#define MAP_W 64
-#define MAP_H 16
-#define GRAVITY 10*64
-#define SPEED 300.0f
-#define JUMP_VEL 300.0f
+// Render a texture-based island scene on a blue ocean with one palm tree.
 
-typedef struct {
-    float x, y;
-    float vx, vy;
-    int w, h;
-    int onGround;
-} Player;
+static void gameTick(double dt) {
+    // No game logic yet.
+    (void)dt;
+}
 
-static Player player;
-static SDL_Rect blocks[32];
-static int block_count = 0;
-static const int ground_y = (MAP_H - 1) * TILE;
-static float camera_x = 0.0f;
-static Uint32 start_ticks = 0;
+static void gameRender(SDL_Renderer *r) {
+    (void)r; // drawTexture uses the global renderer
 
-   D Timer = 100;
-typedef struct {
-    float x, y;
-    float vx;
-    int w, h;
-} Enemy;
+    int tileW, tileH;
+    SDL_Texture *waterTex = resGetTexture("water");
+    SDL_Texture *sandTex = resGetTexture("sand");
+    SDL_QueryTexture(waterTex, NULL, NULL, &tileW, &tileH);
 
-//magic number bad!!!
-static Enemy enemies[8];
-static int enemy_count = 0;
+    int tilesX = (w + tileW - 1) / tileW;
+    int tilesY = (h + tileH - 1) / tileH;
+    const float radius = 3.5f; // base radius in tiles for island
 
-
-static void gameTickInternal(double dt) {
-    if (Held(INP_A)){ player.vx = -SPEED; }
-    else if (Held(INP_D)){ player.vx = SPEED; }
-    else player.vx = 0;
-
-    if (Pressed(INP_W) && player.onGround) {
-        player.vy = -JUMP_VEL;
-        player.onGround = 0;
-    }
-
-    player.vy += GRAVITY * dt;
-    player.x += player.vx * dt;
-    player.y += player.vy *dt;
-
-    if (player.y + player.h > ground_y) {
-        player.y = ground_y - player.h;
-        player.vy = 0;
-        player.onGround = 1;
-    }
-
-    for (int i = 0; i < block_count; ++i) {
-        SDL_Rect b = blocks[i];
-        if (player.x < b.x + b.w && player.x + player.w > b.x &&
-            player.y < b.y + b.h && player.y + player.h > b.y) {
-            if (player.vy > 0 && player.y - player.vy + player.h <= b.y) {
-                player.y = b.y - player.h;
-                player.vy = 0;
-                player.onGround = 1;
-            } else if (player.vy < 0 && player.y - player.vy >= b.y + b.h) {
-                player.y = b.y + b.h;
-                player.vy = 0;
-            } else if (player.vx > 0) {
-                player.x = b.x - player.w;
-            } else if (player.vx < 0) {
-                player.x = b.x + b.w;
+    for (int ty = 0; ty < tilesY; ty++) {
+        for (int tx = 0; tx < tilesX; tx++) {
+            float dx = tx - tilesX / 2.0f + 0.5f;
+            float dy = ty - tilesY / 2.0f + 0.5f;
+            float noise = ((tx * 7 + ty * 3) % 3) * 0.3f; // simple jitter for organic edge
+            float effectiveRadius = radius - noise;
+            SDL_Texture *tex = waterTex;
+            int baseShade = 180;
+            if (dx * dx + dy * dy <= effectiveRadius * effectiveRadius) {
+                tex = sandTex;
+                baseShade = 220;
             }
+            int shade = baseShade + ((tx * 23 + ty * 17) % 51) - 25; // range baseShade-25..baseShade+25
+            if (shade < 0) shade = 0;
+            if (shade > 255) shade = 255;
+            SDL_SetTextureColorMod(tex, shade, shade, shade);
+            SDL_Rect dst = { tx * tileW, ty * tileH, tileW, tileH };
+            drawTexture(tex == sandTex ? "sand" : "water", NULL, &dst, 1);
         }
     }
 
-    for(int i=0;i<enemy_count;i++){
-        Enemy *e = &enemies[i];
-        e->x += e->vx;
-        if(e->x < 0 || e->x + e->w > MAP_W*TILE){
-            e->vx = -e->vx;
-        }
-        SDL_Rect r = {(int)e->x, (int)e->y, e->w, e->h};
-        if(player.x < r.x + r.w && player.x + player.w > r.x &&
-           player.y < r.y + r.h && player.y + player.h > r.y){
-            player.x = 64;
-            player.y = (MAP_H - 2)*TILE;
-            player.vx = player.vy = 0;
-        }
-    }
+    // reset texture color modulation
+    SDL_SetTextureColorMod(waterTex, 255, 255, 255);
+    SDL_SetTextureColorMod(sandTex, 255, 255, 255);
 
-    camera_x = player.x - w/2;
-    if(camera_x < 0) camera_x = 0;
-    int maxCam = MAP_W*TILE - w;
-    if(camera_x > maxCam) camera_x = maxCam;
-    renderSetCamera((int)camera_x,0);
-Timer-=dt;
-}
-
-static void gameRenderInternal(SDL_Renderer *r) {
-    RECT bgRect = {0, 0, MAP_W * TILE, MAP_H * TILE};
-    drawTexture("bg", NULL, &bgRect, 0);
-
-    for (int i = 0; i < MAP_W; ++i) {
-        RECT d = {i * TILE, ground_y, TILE, TILE};
-        drawTexturePal("ground", NULL, &d, 0, "block_pal");
-    }
-
-    for (int i = 0; i < block_count; ++i) {
-        RECT d = {blocks[i].x, blocks[i].y, blocks[i].w, blocks[i].h};
-        drawTexturePal("block", NULL, &d, 0, "block_pal");
-    }
-
-    for(int i=0;i<enemy_count;i++){
-        RECT d = {(int)enemies[i].x, (int)enemies[i].y, enemies[i].w, enemies[i].h};
-        drawTexturePal("block", NULL, &d, 0, "enemy_pal");
-    }
-
-   //make camera be offset in render instead so we dont need to define like this. add a static position bool
-    RECT p = {(int)player.x, (int)player.y, player.w, player.h};
-    drawTexturePal("player", NULL, &p, 0, "player_pal");
-
-    drawText("default_font", 10, 10, (SDL_Color){255,255,255,255}, " %.1f", Timer);
-   //make drawText do the sprintf stuff
-}
-void spawnPlayer(V2  pos){
-    player.x = pos.x;
-    player.y = pos.y;
-    player.w = TILE;
-    player.h = TILE;
-    player.vx = 0;
-    player.vy = 0;
-    player.onGround = 0;
-    camera_x = 0;
-}
-void loadLevel(int level){
-
-   if(level==0){
-    Timer = 100;
-    block_count = 5;
-    blocks[0] = (SDL_Rect){5 * TILE, (MAP_H - 3) * TILE, TILE, TILE};
-    blocks[1] = (SDL_Rect){12 * TILE, (MAP_H - 4) * TILE, TILE, TILE};
-    blocks[2] = (SDL_Rect){20 * TILE, (MAP_H - 6) * TILE, TILE, TILE};
-    blocks[3] = (SDL_Rect){30 * TILE, (MAP_H - 3) * TILE, TILE, TILE};
-    blocks[4] = (SDL_Rect){40 * TILE, (MAP_H - 5) * TILE, TILE, TILE};
-
-    enemy_count = 2;
-    enemies[0] = (Enemy){15 * TILE, (MAP_H - 2) * TILE, 1.0f, TILE, TILE};
-    enemies[1] = (Enemy){35 * TILE, (MAP_H - 2) * TILE, -1.2f, TILE, TILE};
-   }
-   spawnPlayer((V2){64,(MAP_H - 2) * TILE});
+    // Palm tree centered on the island
+    int palmW, palmH;
+    SDL_Texture *palmTex = resGetTexture("palm");
+    SDL_QueryTexture(palmTex, NULL, NULL, &palmW, &palmH);
+    SDL_Rect palmDst = { w / 2 - palmW / 2, h / 2 - palmH / 2, palmW, palmH };
+    drawTexture("palm", NULL, &palmDst, 1);
 }
 
 void gameInit() {
-   loadLevel(0);
-   tickF_add(gameTickInternal);
-   renderF_add(gameRenderInternal);
+    tickF_add(gameTick);
+    renderF_add(gameRender);
 }
+
