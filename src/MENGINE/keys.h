@@ -11,6 +11,8 @@ enum KEYMAP{
     INP_ENTER,
     INP_EXIT,
     INP_CLICK,
+    INP_LCLICK,
+    INP_RCLICK,
     INP_TOTS
 };
 
