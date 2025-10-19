@@ -13,7 +13,7 @@ void quit(){ renderFree(); SDL_Quit(); running=0; }
 
 void init(){
    keysInit();
-   renderInit(512,512);
+   renderInit(512,512, "island");
    gameInit();
 }
 

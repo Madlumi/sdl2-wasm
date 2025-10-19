@@ -1,9 +1,11 @@
 #pragma once
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
 typedef int    I;
+typedef uint32_t U32;
 typedef bool   B;
 typedef float  F;
 typedef double D;

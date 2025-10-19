@@ -1,3 +1,4 @@
+
 #include "game.h"
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
@@ -8,6 +9,7 @@
 #include <SDL_ttf.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 // Tile types for the simple island editor
 enum {
@@ -38,8 +40,14 @@ typedef struct {
 } Tile;
 
 static Tile *tiles; // 2D array flattened: tiles[y * tilesX + x]
-
 static int coconutCount = 0;
+
+// Camera and zoom variables - using renderer's global variables
+static const float MIN_ZOOM = 0.1f;
+static const float MAX_ZOOM = 4.0f;
+static const float ZOOM_SPEED = 0.1f;
+static const float PAN_SPEED = 300.0f; // pixels per second
+static const int EDGE_PAN_MARGIN = 10; // pixels from edge to start panning
 
 typedef struct {
     Elem base;
@@ -56,60 +64,150 @@ static void tileButtonPress(Elem *e) {
 
 static void tileButtonUpdate(Elem *e) {
     TileButton *tb = (TileButton *)e;
-    tb->hovered = INSQ(mpos, tb->base.area);
+    POINT mousePoint = {mpos.x, mpos.y};
+    tb->hovered = INSQ(mousePoint, tb->base.area);
     tb->pressed = tb->hovered && Held(INP_CLICK);
 }
 
 static void tileButtonRender(Elem *e, SDL_Renderer *r) {
     TileButton *tb = (TileButton *)e;
+    SDL_Rect area = e->area;
 
-    SDL_Rect img = { e->area.x + 16, e->area.y + 10, e->area.w - 32, e->area.w - 32 };
-
-    SDL_Texture *tex = resGetTexture(tb->tileType == TILE_WATER ? "water" : "sand");
-    Uint8 rCol = 255, gCol = 255, bCol = 255;
-    switch (tb->tileType) {
-        case TILE_GRASS: rCol = 50;  gCol = 200; bCol = 50;  break;
-        case TILE_STONE: rCol = 130; gCol = 130; bCol = 130; break;
-        case TILE_DIRT:  rCol = 150; gCol = 75;  bCol = 0;   break;
-        case TILE_WATER:
-        case TILE_SAND:
-        default: break;
-    }
-    SDL_SetTextureColorMod(tex, rCol, gCol, bCol);
-    SDL_RenderCopy(r, tex, NULL, &img);
-    SDL_SetTextureColorMod(tex, 255, 255, 255);
-
-    SDL_Color c = {255, 255, 255, 255};
-    drawText("default_font", e->area.x + 5, e->area.y + e->area.h - 18, c, tb->label);
-
+    // Draw button background based on state
+    SDL_Color bgColor = {80, 80, 80, 255};
     if (tb->hovered) {
-        SDL_SetRenderDrawColor(r, 255, 255, 255, 50);
-        SDL_RenderFillRect(r, &e->area);
+        bgColor.r = bgColor.g = bgColor.b = 120;
     }
     if (tb->pressed) {
-        SDL_SetRenderDrawColor(r, 0, 0, 0, 100);
-        SDL_RenderFillRect(r, &e->area);
+        bgColor.r = bgColor.g = bgColor.b = 60;
     }
-
-    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-    SDL_RenderDrawRect(r, &e->area);
+    if (currentTile == tb->tileType) {
+        bgColor.r = 200; // Highlight selected tile
+    }
+    
+    drawRect(area.x, area.y, area.w, area.h, ANCHOR_TOP_L, bgColor);
+    
+    // Draw tile preview (centered in button)
+    const char* texName = "sand";
+    SDL_Color tint = {255, 255, 255, 255};
+    switch (tb->tileType) {
+        case TILE_WATER: 
+            texName = "water";
+            tint.r = 100; tint.g = 100; tint.b = 255;
+            break;
+        case TILE_GRASS:
+            texName = "sand";
+            tint.r = 50; tint.g = 200; tint.b = 50;
+            break;
+        case TILE_STONE:
+            texName = "sand";
+            tint.r = 130; tint.g = 130; tint.b = 130;
+            break;
+        case TILE_DIRT:
+            texName = "sand";
+            tint.r = 150; tint.g = 75; tint.b = 0;
+            break;
+    }
+    
+    // Apply tint to texture and draw centered in button
+    SDL_Texture *tex = resGetTexture(texName);
+    if (tex) {
+        SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
+        drawTexture(texName, area.x + area.w/2, area.y + area.h/2 - 10, ANCHOR_CENTER, NULL);
+        SDL_SetTextureColorMod(tex, 255, 255, 255); // Reset
+    }
+    
+    // Draw label at bottom of button
+    SDL_Color textColor = {255, 255, 255, 255};
+    drawText("default_font", area.x + area.w/2, area.y + area.h - 5, 
+             ANCHOR_CENTER, textColor, tb->label);
+    
+    // Draw border
+    SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
+    SDL_RenderDrawRect(r, &area);
 }
 
 static TileButton *newTileButton(RECT area, int tileType, const char *label) {
     TileButton *tb = malloc(sizeof(TileButton));
     tb->base.area = area;
-    tb->base.onPress = tileButtonPress;
-    tb->base.onUpdate = tileButtonUpdate;
-    tb->base.onRender = tileButtonRender;
+    tb->base.onPress = (void(*)(Elem*))tileButtonPress;
+    tb->base.onUpdate = (void(*)(Elem*))tileButtonUpdate;
+    tb->base.onRender = (void(*)(Elem*, SDL_Renderer*))tileButtonRender;
     tb->tileType = tileType;
     tb->label = label;
     tb->hovered = tb->pressed = 0;
     return tb;
 }
 
+static void handleZoom(double dt) {
+    extern int mouseWheelMoved;
+    
+    if (mouseWheelMoved > 0) {
+        float oldZoom = ZOOM;
+        ZOOM += ZOOM_SPEED;
+        if (ZOOM > MAX_ZOOM) ZOOM = MAX_ZOOM;
+        
+        // Zoom towards mouse position
+        if (ZOOM != oldZoom) {
+            float zoomFactor = ZOOM / oldZoom;
+            
+            // Convert mouse position to world coordinates
+            float worldMouseX = mpos.x / oldZoom + XOFF;
+            float worldMouseY = mpos.y / oldZoom + YOFF;
+            
+            XOFF = worldMouseX - (worldMouseX - XOFF) / zoomFactor;
+            YOFF = worldMouseY - (worldMouseY - YOFF) / zoomFactor;
+        }
+        mouseWheelMoved = 0;
+    } else if (mouseWheelMoved < 0) {
+        float oldZoom = ZOOM;
+        ZOOM -= ZOOM_SPEED;
+        if (ZOOM < MIN_ZOOM) ZOOM = MIN_ZOOM;
+        
+        // Zoom towards mouse position
+        if (ZOOM != oldZoom) {
+            float zoomFactor = ZOOM / oldZoom;
+            
+            // Convert mouse position to world coordinates
+            float worldMouseX = mpos.x / oldZoom + XOFF;
+            float worldMouseY = mpos.y / oldZoom + YOFF;
+            
+            XOFF = worldMouseX - (worldMouseX - XOFF) / zoomFactor;
+            YOFF = worldMouseY - (worldMouseY - YOFF) / zoomFactor;
+        }
+        mouseWheelMoved = 0;
+    }
+}
+
+static void handleEdgePanning(double dt) {
+    float panDistance = PAN_SPEED * dt / ZOOM;
+    
+    // Check if mouse is near edges and pan accordingly
+    if (mpos.x <= EDGE_PAN_MARGIN) {
+        XOFF -= panDistance;
+    } else if (mpos.x >= WINW - EDGE_PAN_MARGIN) {
+        XOFF += panDistance;
+    }
+    
+    if (mpos.y <= EDGE_PAN_MARGIN) {
+        YOFF -= panDistance;
+    } else if (mpos.y >= WINH - EDGE_PAN_MARGIN) {
+        YOFF += panDistance;
+    }
+}
+
 static void gameTick(double dt) {
-    int tx = mpos.x / tileW;
-    int ty = mpos.y / tileH;
+    handleZoom(dt);
+    handleEdgePanning(dt);
+    
+    // Convert mouse position to world coordinates
+    float worldMouseX = mpos.x / ZOOM + XOFF;
+    float worldMouseY = mpos.y / ZOOM + YOFF;
+    
+    // Convert world coordinates to tile coordinates
+    int tx = (int)(worldMouseX / tileW);
+    int ty = (int)(worldMouseY / tileH);
+    
     if (tx >= 0 && tx < tilesX && ty >= 0 && ty < tilesY) {
         if (Held(INP_LCLICK)) {
             Tile *t = &tiles[ty * tilesX + tx];
@@ -158,120 +256,187 @@ static void gameTick(double dt) {
     }
 }
 
-static void gameRender(SDL_Renderer *r) {
-    SDL_Texture *waterTex = resGetTexture("water");
-    SDL_Texture *sandTex = resGetTexture("sand");
+static void renderWorld(SDL_Renderer *r) {
+    // Convert mouse position to world coordinates for hover detection
+    float worldMouseX = mpos.x / ZOOM + XOFF;
+    float worldMouseY = mpos.y / ZOOM + YOFF;
+    int hoverX = (int)(worldMouseX / tileW);
+    int hoverY = (int)(worldMouseY / tileH);
 
-    int hoverX = mpos.x / tileW;
-    int hoverY = mpos.y / tileH;
+    // Calculate visible tile range for culling
+    float viewWidth = WINW / ZOOM;
+    float viewHeight = WINH / ZOOM;
+    
+    int startTileX = (int)fmaxf(0, (XOFF - viewWidth/2) / tileW - 1);
+    int endTileX = (int)fminf(tilesX, (XOFF + viewWidth/2) / tileW + 2);
+    int startTileY = (int)fmaxf(0, (YOFF - viewHeight/2) / tileH - 1);
+    int endTileY = (int)fminf(tilesY, (YOFF + viewHeight/2) / tileH + 2);
 
-    SDL_Texture *palmTex = resGetTexture("palm");
-    int palmW, palmH;
-    SDL_QueryTexture(palmTex, NULL, NULL, &palmW, &palmH);
-
-    for (int ty = 0; ty < tilesY; ty++) {
-        for (int tx = 0; tx < tilesX; tx++) {
+    // Render terrain
+    for (int ty = startTileY; ty < endTileY; ty++) {
+        for (int tx = startTileX; tx < endTileX; tx++) {
             Tile *tile = &tiles[ty * tilesX + tx];
-            unsigned char t = tile->type;
-            SDL_Texture *tex = (t == TILE_WATER) ? waterTex : sandTex;
-            int baseShade = 200;
-            Uint8 baseR = 255, baseG = 255, baseB = 255;
-            switch (t) {
-                case TILE_WATER: baseShade = 180; break;
-                case TILE_SAND:  baseShade = 220; break;
-                case TILE_GRASS: baseR = 50;  baseG = 200; baseB = 50;  break;
-                case TILE_STONE: baseR = 130; baseG = 130; baseB = 130; break;
-                case TILE_DIRT:  baseR = 150; baseG = 75;  baseB = 0;   break;
+            
+            // Determine texture and color based on tile type
+            const char* texName = "sand";
+            SDL_Color tint = {255, 255, 255, 255};
+            switch (tile->type) {
+                case TILE_WATER: 
+                    texName = "water";
+                    tint.r = 100; tint.g = 100; tint.b = 255;
+                    break;
+                case TILE_GRASS:
+                    texName = "sand";
+                    tint.r = 50; tint.g = 200; tint.b = 50;
+                    break;
+                case TILE_STONE:
+                    texName = "sand";
+                    tint.r = 130; tint.g = 130; tint.b = 130;
+                    break;
+                case TILE_DIRT:
+                    texName = "sand";
+                    tint.r = 150; tint.g = 75; tint.b = 0;
+                    break;
             }
-            int shade = baseShade + ((tx * 23 + ty * 17) % 51) - 25;
-            if (shade < 0) shade = 0;
-            if (shade > 255) shade = 255;
-            Uint8 rCol = (Uint8)((baseR * shade) / 255);
-            Uint8 gCol = (Uint8)((baseG * shade) / 255);
-            Uint8 bCol = (Uint8)((baseB * shade) / 255);
-            SDL_SetTextureColorMod(tex, rCol, gCol, bCol);
-            SDL_Rect dst = { tx * tileW, ty * tileH, tileW, tileH };
-            SDL_RenderCopy(r, tex, NULL, &dst);
-            if (tx == hoverX && ty == hoverY) {
+            
+            // Apply tint and draw tile
+            SDL_Texture *tex = resGetTexture(texName);
+            if (tex) {
+                SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
+                drawTexture(texName, tx * tileW, ty * tileH, ANCHOR_NONE, NULL);
+                SDL_SetTextureColorMod(tex, 255, 255, 255); // Reset
+            }
+            
+            // Draw hover highlight
+            if (tx == hoverX && ty == hoverY && hoverX >= 0 && hoverY >= 0 && hoverX < tilesX && hoverY < tilesY) {
+                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(r, 255, 255, 255, 80);
-                SDL_RenderFillRect(r, &dst);
-            }
-
-            SDL_Rect objDst;
-            switch (tile->obj) {
-                case OBJ_COCONUT:
-                    objDst.w = palmW / 4;
-                    objDst.h = palmH / 4;
-                    objDst.x = dst.x + tileW / 2 - objDst.w / 2;
-                    objDst.y = dst.y + tileH / 2 - objDst.h / 2;
-                    SDL_SetTextureColorMod(palmTex, 150, 75, 0);
-                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
-                    SDL_SetTextureColorMod(palmTex, 255, 255, 255);
-                    break;
-                case OBJ_SAPLING:
-                    objDst.w = palmW / 2;
-                    objDst.h = palmH / 2;
-                    objDst.x = dst.x + tileW / 2 - objDst.w / 2;
-                    objDst.y = dst.y + tileH / 2 - objDst.h / 2;
-                    SDL_SetTextureColorMod(palmTex, 50, 200, 50);
-                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
-                    SDL_SetTextureColorMod(palmTex, 255, 255, 255);
-                    break;
-                case OBJ_TREE:
-                    objDst = (SDL_Rect){ dst.x + tileW / 2 - palmW / 2, dst.y + tileH / 2 - palmH / 2, palmW, palmH };
-                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
-                    break;
-                case OBJ_WITHER:
-                    objDst = (SDL_Rect){ dst.x + tileW / 2 - palmW / 2, dst.y + tileH / 2 - palmH / 2, palmW, palmH };
-                    SDL_SetTextureColorMod(palmTex, 100, 100, 100);
-                    SDL_RenderCopy(r, palmTex, NULL, &objDst);
-                    SDL_SetTextureColorMod(palmTex, 255, 255, 255);
-                    break;
-                default:
-                    break;
+                
+                // Calculate screen position for highlight
+                int screenX, screenY;
+                worldToScreen(tx * tileW, ty * tileH, &screenX, &screenY);
+                SDL_Rect highlightRect = {screenX, screenY, (int)(tileW * ZOOM), (int)(tileH * ZOOM)};
+                SDL_RenderFillRect(r, &highlightRect);
             }
         }
     }
-    SDL_SetTextureColorMod(waterTex, 255, 255, 255);
-    SDL_SetTextureColorMod(sandTex, 255, 255, 255);
-
-    SDL_Texture *cocoTex = resGetTexture("coconut");
-    if (cocoTex) {
-        int iconW, iconH;
-        SDL_QueryTexture(cocoTex, NULL, NULL, &iconW, &iconH);
-
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%d", coconutCount);
-
-        TTF_Font *font = resGetFont("default_font");
-        int textW = 0, textH = 0;
-        if (font) {
-            TTF_SizeUTF8(font, buf, &textW, &textH);
+    
+    // Render objects on top of terrain
+    for (int ty = startTileY; ty < endTileY; ty++) {
+        for (int tx = startTileX; tx < endTileX; tx++) {
+            Tile *tile = &tiles[ty * tilesX + tx];
+            
+            // Render objects on tiles
+            if (tile->obj != OBJ_NONE) {
+                const char* objName = NULL;
+                SDL_Color objTint = {255, 255, 255, 255};
+                float objScale = 1.0f;
+                
+                switch (tile->obj) {
+                    case OBJ_COCONUT:
+                        objName = "coconut";
+                        objScale = 0.5f;
+                        break;
+                    case OBJ_SAPLING:
+                        objName = "palm";
+                        objScale = 0.5f;
+                        objTint.r = 50; objTint.g = 200; objTint.b = 50;
+                        break;
+                    case OBJ_TREE:
+                        objName = "palm";
+                        break;
+                    case OBJ_WITHER:
+                        objName = "palm";
+                        objTint.r = 100; objTint.g = 100; objTint.b = 100;
+                        break;
+                }
+                
+                if (objName) {
+                    SDL_Texture *objTex = resGetTexture(objName);
+                    if (objTex) {
+                        SDL_SetTextureColorMod(objTex, objTint.r, objTint.g, objTint.b);
+                        
+                        // Calculate position centered on tile
+                        int objWorldX = tx * tileW + tileW/2;
+                        int objWorldY = ty * tileH + tileH/2;
+                        
+                        // Draw the object
+                        drawTexture(objName, objWorldX, objWorldY, ANCHOR_NONE, NULL);
+                        
+                        // Reset color mod
+                        SDL_SetTextureColorMod(objTex, 255, 255, 255);
+                    }
+                }
+            }
         }
-
-        SDL_Rect iconDst = { w - iconW - textW - 20, 10, iconW, iconH };
-        SDL_RenderCopy(r, cocoTex, NULL, &iconDst);
-
-        SDL_Color white = {255, 255, 255, 255};
-        drawText("default_font", iconDst.x + iconW + 5, iconDst.y + (iconH - textH) / 2, white, "%s", buf);
     }
 }
 
+static void renderUI(SDL_Renderer *r) {
+    // UI elements (drawn on top of everything)
+    SDL_Color white = {255, 255, 255, 255};
+    
+    // Coconut counter (top right)
+    drawTexture("coconut", WINW - 30, 20, ANCHOR_TOP_R, NULL);
+    drawText("default_font", WINW - 40, 20, ANCHOR_TOP_R, white, "%d", coconutCount);
+    
+    // Zoom level indicator (top left)
+    drawText("default_font", 10, 10, ANCHOR_TOP_L, white, "Zoom: %.1fx", ZOOM);
+    
+    // Instructions (bottom center)
+    drawText("default_font", WINW/2, WINH - 10, ANCHOR_MID_BOT, white, 
+             "WASD/Edge pan - Move | Mouse Wheel - Zoom | Click - Place tiles");
+}
+
+static void gameRender(SDL_Renderer *r) {
+    // Render world (terrain + objects)
+    renderWorld(r);
+    
+    // Render UI on top
+    renderUI(r);
+}
+
 void gameInit() {
+    // Get tile dimensions from water texture
     SDL_Texture *waterTex = resGetTexture("water");
     SDL_QueryTexture(waterTex, NULL, NULL, &tileW, &tileH);
-    tilesX = (w + tileW - 1) / tileW;
-    tilesY = (h + tileH - 1) / tileH;
+    
+    // Create a large world
+    tilesX = 100;
+    tilesY = 100;
+    
     tiles = malloc(sizeof(Tile) * tilesX * tilesY);
-    coconutCount = 0;
+    coconutCount = 10; // Start with some coconuts
+    
+    // Initialize camera to center of world
+    XOFF = (tilesX * tileW) / 2;
+    YOFF = (tilesY * tileH) / 2;
+    
+    // Set initial zoom
+    ZOOM = 1.0f;
+    
+    // Initialize world with water and a central island
     for (int ty = 0; ty < tilesY; ty++) {
         for (int tx = 0; tx < tilesX; tx++) {
             Tile *t = &tiles[ty * tilesX + tx];
-            t->type = TILE_WATER;
+            
+            // Create island in the center
+            float distFromCenter = sqrtf((tx - tilesX/2) * (tx - tilesX/2) + (ty - tilesY/2) * (ty - tilesY/2));
+            
+            if (distFromCenter < 5) {
+                t->type = TILE_SAND;
+            } else if (distFromCenter < 15) {
+                t->type = (rand() % 3 == 0) ? TILE_SAND : TILE_WATER;
+            } else {
+                t->type = TILE_WATER;
+            }
+            
             t->obj = OBJ_NONE;
             t->timer = 0;
         }
     }
+    
+    // Add a tree in the center
     int centerX = tilesX / 2;
     int centerY = tilesY / 2;
     Tile *center = &tiles[centerY * tilesX + centerX];
@@ -279,16 +444,23 @@ void gameInit() {
     center->obj = OBJ_TREE;
     center->timer = 0;
 
+    // Register game functions
     tickF_add(gameTick);
     renderF_add(gameRender);
 
-    int handler = initUiHandler((RECT){0, 0, 100, h});
-    int buttonSize = 80;
+    // Create UI buttons (positioned properly)
+    int handler = initUiHandler((RECT){10, WINH - 90, WINW - 20, 80});
+    int buttonSize = 70;
     int gap = 10;
     const char *labels[] = {"Grass", "Water", "Sand", "Stone", "Dirt"};
     int types[] = {TILE_GRASS, TILE_WATER, TILE_SAND, TILE_STONE, TILE_DIRT};
+    
+    // Calculate total width needed for buttons
+    int totalWidth = 5 * buttonSize + 4 * gap;
+    int startX = (WINW - totalWidth) / 2;
+    
     for (int i = 0; i < 5; i++) {
-        RECT br = {gap, gap + i * (buttonSize + gap), buttonSize, buttonSize};
+        RECT br = {startX + i * (buttonSize + gap), WINH - 80, buttonSize, buttonSize};
         TileButton *tb = newTileButton(br, types[i], labels[i]);
         addElem(&ui[handler], (Elem *)tb);
     }

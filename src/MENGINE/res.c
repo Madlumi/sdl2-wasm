@@ -59,22 +59,53 @@ static int image_count = sizeof(image_list)/sizeof(ImageRes);
 static int sound_count = sizeof(sound_list)/sizeof(SoundRes);
 static int font_count  = sizeof(font_list)/sizeof(FontRes);
 
+
+
 void resLoadAll(SDL_Renderer *r){
     IMG_Init(IMG_INIT_PNG);
     TTF_Init();
     Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048);
+    
+    printf("Loading %d images...\n", image_count);
     for(int i=0;i<image_count;i++){
+        printf("Loading image: %s from %s\n", image_list[i].name, image_list[i].path);
         image_list[i].surface = IMG_Load(image_list[i].path);
-        if(image_list[i].surface)
+        if(image_list[i].surface) {
+            printf("  Success! Dimensions: %dx%d\n", image_list[i].surface->w, image_list[i].surface->h);
             image_list[i].tex = SDL_CreateTextureFromSurface(r, image_list[i].surface);
+            if (!image_list[i].tex) {
+                printf("  Failed to create texture: %s\n", SDL_GetError());
+            }
+        } else {
+            printf("  Failed to load image: %s\n", IMG_GetError());
+        }
     }
+    
+    printf("Loading %d sounds...\n", sound_count);
     for(int i=0;i<sound_count;i++){
+        printf("Loading sound: %s from %s\n", sound_list[i].name, sound_list[i].path);
         sound_list[i].chunk = Mix_LoadWAV(sound_list[i].path);
+        if (!sound_list[i].chunk) {
+            printf("  Failed to load sound: %s\n", Mix_GetError());
+        }
     }
+    
+    printf("Loading %d fonts...\n", font_count);
     for(int i=0;i<font_count;i++){
+        printf("Loading font: %s from %s\n", font_list[i].name, font_list[i].path);
         font_list[i].font = TTF_OpenFont(font_list[i].path, 16);
+        if (!font_list[i].font) {
+            printf("  Failed to load font: %s\n", TTF_GetError());
+        }
     }
+    
+    printf("Resource loading complete.\n");
 }
+
+
+
+
+
 
 SDL_Texture *resGetTexture(const char *name){
     for(int i=0;i<image_count;i++){
