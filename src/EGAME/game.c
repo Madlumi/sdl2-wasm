@@ -1,467 +1,297 @@
-
 #include "game.h"
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
 #include "../MENGINE/res.h"
 #include "../MENGINE/keys.h"
-#include "../MENGINE/ui.h"
+#define FNL_IMPL
+#include "../lib/FastNoiseLite.h"
+#undef FNL_IMPL
+
 #include <SDL.h>
-#include <SDL_ttf.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-// Tile types for the simple island editor
-enum {
-    TILE_GRASS = 0,
-    TILE_WATER,
-    TILE_SAND,
-    TILE_STONE,
-    TILE_DIRT,
-    TILE_TOTAL
-};
-
-enum {
-    OBJ_NONE = 0,
-    OBJ_COCONUT,
-    OBJ_SAPLING,
-    OBJ_TREE,
-    OBJ_WITHER
-};
-
-static int currentTile = TILE_SAND;
-static int tileW, tileH;
-static int tilesX, tilesY;
+#define GRID_RESOLUTION 64
+#define PLANE_EXTENT 8.0f
 
 typedef struct {
-    unsigned char type;
-    unsigned char obj;
-    double timer;
-} Tile;
+    float x;
+    float z;
+    float u;
+    float v;
+} GridPoint;
 
-static Tile *tiles; // 2D array flattened: tiles[y * tilesX + x]
-static int coconutCount = 0;
+static GridPoint gridPoints[GRID_RESOLUTION * GRID_RESOLUTION];
+static float heightMap[GRID_RESOLUTION * GRID_RESOLUTION];
+static SDL_Vertex *meshVertices = NULL;
+static int meshVertexCount = 0;
+static SDL_Texture *terrainTexture = NULL;
+static fnl_state noiseState;
 
-// Camera and zoom variables - using renderer's global variables
-static const float MIN_ZOOM = 0.1f;
-static const float MAX_ZOOM = 4.0f;
-static const float ZOOM_SPEED = 0.1f;
-static const float PAN_SPEED = 300.0f; // pixels per second
-static const int EDGE_PAN_MARGIN = 10; // pixels from edge to start panning
+static float rotationX = 1.1f;
+static float rotationY = 0.65f;
+static float amplitude = 0.8f;
+static float animationTime = 0.0f;
+static float animationSpeed = 0.35f;
+static float cameraDistance = 7.5f;
+static float cameraHeight = 1.8f;
 
-typedef struct {
-    Elem base;
-    int tileType;
-    const char *label;
-    int hovered;
-    int pressed;
-} TileButton;
+static void updateHeightMap(float timeValue);
+static void rebuildMesh(void);
+static void renderTerrain(SDL_Renderer *renderer);
+static void gameTick(double dt);
+static void shutdownTerrain(void);
+static void updateControls(double dt);
 
-static void tileButtonPress(Elem *e) {
-    TileButton *tb = (TileButton *)e;
-    currentTile = tb->tileType;
+static inline float clampf(float v, float min, float max) {
+    if (v < min) return min;
+    if (v > max) return max;
+    return v;
 }
 
-static void tileButtonUpdate(Elem *e) {
-    TileButton *tb = (TileButton *)e;
-    POINT mousePoint = {mpos.x, mpos.y};
-    tb->hovered = INSQ(mousePoint, tb->base.area);
-    tb->pressed = tb->hovered && Held(INP_CLICK);
+static inline Uint8 clampColor(float value) {
+    value = clampf(value, 0.0f, 255.0f);
+    return (Uint8)(value + 0.5f);
 }
 
-static void tileButtonRender(Elem *e, SDL_Renderer *r) {
-    TileButton *tb = (TileButton *)e;
-    SDL_Rect area = e->area;
-
-    // Draw button background based on state
-    SDL_Color bgColor = {80, 80, 80, 255};
-    if (tb->hovered) {
-        bgColor.r = bgColor.g = bgColor.b = 120;
-    }
-    if (tb->pressed) {
-        bgColor.r = bgColor.g = bgColor.b = 60;
-    }
-    if (currentTile == tb->tileType) {
-        bgColor.r = 200; // Highlight selected tile
-    }
-    
-    drawRect(area.x, area.y, area.w, area.h, ANCHOR_TOP_L, bgColor);
-    
-    // Draw tile preview (centered in button)
-    const char* texName = "sand";
-    SDL_Color tint = {255, 255, 255, 255};
-    switch (tb->tileType) {
-        case TILE_WATER: 
-            texName = "water";
-            tint.r = 100; tint.g = 100; tint.b = 255;
-            break;
-        case TILE_GRASS:
-            texName = "sand";
-            tint.r = 50; tint.g = 200; tint.b = 50;
-            break;
-        case TILE_STONE:
-            texName = "sand";
-            tint.r = 130; tint.g = 130; tint.b = 130;
-            break;
-        case TILE_DIRT:
-            texName = "sand";
-            tint.r = 150; tint.g = 75; tint.b = 0;
-            break;
-    }
-    
-    // Apply tint to texture and draw centered in button
-    SDL_Texture *tex = resGetTexture(texName);
-    if (tex) {
-        SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
-        drawTexture(texName, area.x + area.w/2, area.y + area.h/2 - 10, ANCHOR_CENTER, NULL);
-        SDL_SetTextureColorMod(tex, 255, 255, 255); // Reset
-    }
-    
-    // Draw label at bottom of button
-    SDL_Color textColor = {255, 255, 255, 255};
-    drawText("default_font", area.x + area.w/2, area.y + area.h - 5, 
-             ANCHOR_CENTER, textColor, tb->label);
-    
-    // Draw border
-    SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
-    SDL_RenderDrawRect(r, &area);
+static int pointIndex(int gx, int gz) {
+    return gz * GRID_RESOLUTION + gx;
 }
 
-static TileButton *newTileButton(RECT area, int tileType, const char *label) {
-    TileButton *tb = malloc(sizeof(TileButton));
-    tb->base.area = area;
-    tb->base.onPress = (void(*)(Elem*))tileButtonPress;
-    tb->base.onUpdate = (void(*)(Elem*))tileButtonUpdate;
-    tb->base.onRender = (void(*)(Elem*, SDL_Renderer*))tileButtonRender;
-    tb->tileType = tileType;
-    tb->label = label;
-    tb->hovered = tb->pressed = 0;
-    return tb;
+static SDL_FPoint projectPoint(float x, float y, float z) {
+    float cosY = cosf(rotationY);
+    float sinY = sinf(rotationY);
+    float rotatedX = x * cosY + z * sinY;
+    float rotatedZ = -x * sinY + z * cosY;
+
+    float cosX = cosf(rotationX);
+    float sinX = sinf(rotationX);
+    float rotatedY = y * cosX - rotatedZ * sinX;
+    float rotatedZ2 = y * sinX + rotatedZ * cosX;
+
+    float viewX = rotatedX;
+    float viewY = rotatedY - cameraHeight;
+    float viewZ = rotatedZ2 + cameraDistance;
+    if (viewZ < 0.1f) viewZ = 0.1f;
+
+    float screenScale = (WINW < WINH ? WINW : WINH) * 0.45f;
+    float perspective = screenScale / viewZ;
+
+    SDL_FPoint screen;
+    screen.x = WINW * 0.5f + viewX * perspective;
+    screen.y = WINH * 0.5f - viewY * perspective;
+    return screen;
 }
 
-static void handleZoom(double dt) {
-    extern int mouseWheelMoved;
-    
-    if (mouseWheelMoved > 0) {
-        float oldZoom = ZOOM;
-        ZOOM += ZOOM_SPEED;
-        if (ZOOM > MAX_ZOOM) ZOOM = MAX_ZOOM;
-        
-        // Zoom towards mouse position
-        if (ZOOM != oldZoom) {
-            float zoomFactor = ZOOM / oldZoom;
-            
-            // Convert mouse position to world coordinates
-            float worldMouseX = mpos.x / oldZoom + XOFF;
-            float worldMouseY = mpos.y / oldZoom + YOFF;
-            
-            XOFF = worldMouseX - (worldMouseX - XOFF) / zoomFactor;
-            YOFF = worldMouseY - (worldMouseY - YOFF) / zoomFactor;
+static void calculateNormal(int gx, int gz, float *nx, float *ny, float *nz) {
+    int left = gx > 0 ? gx - 1 : gx;
+    int right = gx < GRID_RESOLUTION - 1 ? gx + 1 : gx;
+    int down = gz > 0 ? gz - 1 : gz;
+    int up = gz < GRID_RESOLUTION - 1 ? gz + 1 : gz;
+
+    float heightLeft = heightMap[pointIndex(left, gz)];
+    float heightRight = heightMap[pointIndex(right, gz)];
+    float heightDown = heightMap[pointIndex(gx, down)];
+    float heightUp = heightMap[pointIndex(gx, up)];
+
+    float dx = heightRight - heightLeft;
+    float dz = heightUp - heightDown;
+
+    *nx = -dx;
+    *ny = 2.5f;
+    *nz = -dz;
+
+    float length = sqrtf((*nx) * (*nx) + (*ny) * (*ny) + (*nz) * (*nz));
+    if (length > 0.0001f) {
+        *nx /= length;
+        *ny /= length;
+        *nz /= length;
+    } else {
+        *nx = 0.0f;
+        *ny = 1.0f;
+        *nz = 0.0f;
+    }
+}
+
+static SDL_Color shadedColor(int gx, int gz) {
+    float nx, ny, nz;
+    calculateNormal(gx, gz, &nx, &ny, &nz);
+
+    const float lightX = -0.35f;
+    const float lightY = 0.8f;
+    const float lightZ = 0.45f;
+    float lightLen = sqrtf(lightX * lightX + lightY * lightY + lightZ * lightZ);
+    float lx = lightX / lightLen;
+    float ly = lightY / lightLen;
+    float lz = lightZ / lightLen;
+
+    float diffuse = clampf(nx * lx + ny * ly + nz * lz, 0.2f, 1.0f);
+
+    float normalizedHeight = (heightMap[pointIndex(gx, gz)] / amplitude) * 0.5f + 0.5f;
+    normalizedHeight = clampf(normalizedHeight, 0.0f, 1.0f);
+
+    float baseR = 120.0f + 70.0f * normalizedHeight;
+    float baseG = 140.0f + 80.0f * normalizedHeight;
+    float baseB = 155.0f + 50.0f * normalizedHeight;
+
+    SDL_Color color = {
+        clampColor(baseR * diffuse),
+        clampColor(baseG * diffuse),
+        clampColor(baseB * diffuse),
+        255
+    };
+    return color;
+}
+
+static void buildVertex(int gx, int gz, SDL_Vertex *outVertex) {
+    int idx = pointIndex(gx, gz);
+    GridPoint gp = gridPoints[idx];
+    float height = heightMap[idx];
+
+    SDL_FPoint projected = projectPoint(gp.x, height, gp.z);
+    outVertex->position.x = projected.x;
+    outVertex->position.y = projected.y;
+    outVertex->tex_coord.x = gp.u;
+    outVertex->tex_coord.y = gp.v;
+    outVertex->color = shadedColor(gx, gz);
+}
+
+static void updateHeightMap(float timeValue) {
+    for (int gz = 0; gz < GRID_RESOLUTION; ++gz) {
+        for (int gx = 0; gx < GRID_RESOLUTION; ++gx) {
+            GridPoint gp = gridPoints[pointIndex(gx, gz)];
+            float sample = fnlGetNoise3D(&noiseState, gp.x, gp.z, timeValue * animationSpeed);
+            heightMap[pointIndex(gx, gz)] = sample * amplitude;
         }
-        mouseWheelMoved = 0;
-    } else if (mouseWheelMoved < 0) {
-        float oldZoom = ZOOM;
-        ZOOM -= ZOOM_SPEED;
-        if (ZOOM < MIN_ZOOM) ZOOM = MIN_ZOOM;
-        
-        // Zoom towards mouse position
-        if (ZOOM != oldZoom) {
-            float zoomFactor = ZOOM / oldZoom;
-            
-            // Convert mouse position to world coordinates
-            float worldMouseX = mpos.x / oldZoom + XOFF;
-            float worldMouseY = mpos.y / oldZoom + YOFF;
-            
-            XOFF = worldMouseX - (worldMouseX - XOFF) / zoomFactor;
-            YOFF = worldMouseY - (worldMouseY - YOFF) / zoomFactor;
-        }
-        mouseWheelMoved = 0;
     }
 }
 
-static void handleEdgePanning(double dt) {
-    float panDistance = PAN_SPEED * dt / ZOOM;
-    
-    // Check if mouse is near edges and pan accordingly
-    if (mpos.x <= EDGE_PAN_MARGIN) {
-        XOFF -= panDistance;
-    } else if (mpos.x >= WINW - EDGE_PAN_MARGIN) {
-        XOFF += panDistance;
+static void rebuildMesh(void) {
+    if (!meshVertices) {
+        return;
     }
-    
-    if (mpos.y <= EDGE_PAN_MARGIN) {
-        YOFF -= panDistance;
-    } else if (mpos.y >= WINH - EDGE_PAN_MARGIN) {
-        YOFF += panDistance;
+
+    int vertexCursor = 0;
+    for (int gz = 0; gz < GRID_RESOLUTION - 1; ++gz) {
+        for (int gx = 0; gx < GRID_RESOLUTION - 1; ++gx) {
+            buildVertex(gx, gz, &meshVertices[vertexCursor++]);
+            buildVertex(gx, gz + 1, &meshVertices[vertexCursor++]);
+            buildVertex(gx + 1, gz, &meshVertices[vertexCursor++]);
+
+            buildVertex(gx + 1, gz, &meshVertices[vertexCursor++]);
+            buildVertex(gx, gz + 1, &meshVertices[vertexCursor++]);
+            buildVertex(gx + 1, gz + 1, &meshVertices[vertexCursor++]);
+        }
+    }
+}
+
+static void updateControls(double dt) {
+    float rotateSpeed = 1.4f;
+    if (Held(INP_A)) {
+        rotationY -= rotateSpeed * (float)dt;
+    }
+    if (Held(INP_D)) {
+        rotationY += rotateSpeed * (float)dt;
+    }
+    if (Held(INP_W)) {
+        rotationX -= rotateSpeed * (float)dt;
+    }
+    if (Held(INP_S)) {
+        rotationX += rotateSpeed * (float)dt;
+    }
+
+    rotationX = clampf(rotationX, 0.2f, 1.5f);
+
+    if (Pressed(INP_ENTER)) {
+        rotationX = 1.1f;
+        rotationY = 0.65f;
+        amplitude = 0.8f;
+    }
+
+    if (mouseWheelMoved != 0) {
+        amplitude += mouseWheelMoved * 0.08f;
+        amplitude = clampf(amplitude, 0.2f, 3.5f);
+        mouseWheelMoved = 0;
     }
 }
 
 static void gameTick(double dt) {
-    handleZoom(dt);
-    handleEdgePanning(dt);
-    
-    // Convert mouse position to world coordinates
-    float worldMouseX = mpos.x / ZOOM + XOFF;
-    float worldMouseY = mpos.y / ZOOM + YOFF;
-    
-    // Convert world coordinates to tile coordinates
-    int tx = (int)(worldMouseX / tileW);
-    int ty = (int)(worldMouseY / tileH);
-    
-    if (tx >= 0 && tx < tilesX && ty >= 0 && ty < tilesY) {
-        if (Held(INP_LCLICK)) {
-            Tile *t = &tiles[ty * tilesX + tx];
-            if (currentTile == TILE_GRASS) {
-                if (t->type != TILE_GRASS && coconutCount >= 5) {
-                    coconutCount -= 5;
-                    t->type = TILE_GRASS;
-                }
-            } else {
-                t->type = currentTile;
-            }
-        }
-    }
-
-    for (int i = 0; i < tilesX * tilesY; i++) {
-        Tile *t = &tiles[i];
-        if (t->type == TILE_GRASS || t->type == TILE_SAND) {
-            if (t->obj == OBJ_NONE) {
-                t->obj = OBJ_COCONUT;
-                t->timer = 0;
-            } else if (t->obj == OBJ_COCONUT) {
-                t->timer += dt;
-                if (t->timer >= 1) { t->obj = OBJ_SAPLING; t->timer = 0; }
-            } else if (t->obj == OBJ_SAPLING) {
-                t->timer += dt;
-                if (t->timer >= 1) { t->obj = OBJ_TREE; t->timer = 0; }
-            } else if (t->obj == OBJ_TREE) {
-                t->timer += dt;
-                if (t->timer >= 1) {
-                    coconutCount++;
-                    t->timer -= 1;
-                }
-            } else if (t->obj == OBJ_WITHER) {
-                t->obj = OBJ_NONE;
-                t->timer = 0;
-            }
-        } else {
-            if (t->obj == OBJ_COCONUT || t->obj == OBJ_SAPLING || t->obj == OBJ_TREE) {
-                t->obj = OBJ_WITHER;
-                t->timer = 0;
-            } else if (t->obj == OBJ_WITHER) {
-                t->timer += dt;
-                if (t->timer >= 1) { t->obj = OBJ_NONE; t->timer = 0; }
-            }
-        }
-    }
+    updateControls(dt);
+    animationTime += (float)dt;
+    updateHeightMap(animationTime);
+    rebuildMesh();
 }
 
-static void renderWorld(SDL_Renderer *r) {
-    // Convert mouse position to world coordinates for hover detection
-    float worldMouseX = mpos.x / ZOOM + XOFF;
-    float worldMouseY = mpos.y / ZOOM + YOFF;
-    int hoverX = (int)(worldMouseX / tileW);
-    int hoverY = (int)(worldMouseY / tileH);
-
-    // Calculate visible tile range for culling
-    float viewWidth = WINW / ZOOM;
-    float viewHeight = WINH / ZOOM;
-    
-    int startTileX = (int)fmaxf(0, (XOFF - viewWidth/2) / tileW - 1);
-    int endTileX = (int)fminf(tilesX, (XOFF + viewWidth/2) / tileW + 2);
-    int startTileY = (int)fmaxf(0, (YOFF - viewHeight/2) / tileH - 1);
-    int endTileY = (int)fminf(tilesY, (YOFF + viewHeight/2) / tileH + 2);
-
-    // Render terrain
-    for (int ty = startTileY; ty < endTileY; ty++) {
-        for (int tx = startTileX; tx < endTileX; tx++) {
-            Tile *tile = &tiles[ty * tilesX + tx];
-            
-            // Determine texture and color based on tile type
-            const char* texName = "sand";
-            SDL_Color tint = {255, 255, 255, 255};
-            switch (tile->type) {
-                case TILE_WATER: 
-                    texName = "water";
-                    tint.r = 100; tint.g = 100; tint.b = 255;
-                    break;
-                case TILE_GRASS:
-                    texName = "sand";
-                    tint.r = 50; tint.g = 200; tint.b = 50;
-                    break;
-                case TILE_STONE:
-                    texName = "sand";
-                    tint.r = 130; tint.g = 130; tint.b = 130;
-                    break;
-                case TILE_DIRT:
-                    texName = "sand";
-                    tint.r = 150; tint.g = 75; tint.b = 0;
-                    break;
-            }
-            
-            // Apply tint and draw tile
-            SDL_Texture *tex = resGetTexture(texName);
-            if (tex) {
-                SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
-                drawTexture(texName, tx * tileW, ty * tileH, ANCHOR_NONE, NULL);
-                SDL_SetTextureColorMod(tex, 255, 255, 255); // Reset
-            }
-            
-            // Draw hover highlight
-            if (tx == hoverX && ty == hoverY && hoverX >= 0 && hoverY >= 0 && hoverX < tilesX && hoverY < tilesY) {
-                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-                SDL_SetRenderDrawColor(r, 255, 255, 255, 80);
-                
-                // Calculate screen position for highlight
-                int screenX, screenY;
-                worldToScreen(tx * tileW, ty * tileH, &screenX, &screenY);
-                SDL_Rect highlightRect = {screenX, screenY, (int)(tileW * ZOOM), (int)(tileH * ZOOM)};
-                SDL_RenderFillRect(r, &highlightRect);
-            }
-        }
+static void renderTerrain(SDL_Renderer *renderer) {
+    if (!meshVertices || !terrainTexture) {
+        return;
     }
-    
-    // Render objects on top of terrain
-    for (int ty = startTileY; ty < endTileY; ty++) {
-        for (int tx = startTileX; tx < endTileX; tx++) {
-            Tile *tile = &tiles[ty * tilesX + tx];
-            
-            // Render objects on tiles
-            if (tile->obj != OBJ_NONE) {
-                const char* objName = NULL;
-                SDL_Color objTint = {255, 255, 255, 255};
-                float objScale = 1.0f;
-                
-                switch (tile->obj) {
-                    case OBJ_COCONUT:
-                        objName = "coconut";
-                        objScale = 0.5f;
-                        break;
-                    case OBJ_SAPLING:
-                        objName = "palm";
-                        objScale = 0.5f;
-                        objTint.r = 50; objTint.g = 200; objTint.b = 50;
-                        break;
-                    case OBJ_TREE:
-                        objName = "palm";
-                        break;
-                    case OBJ_WITHER:
-                        objName = "palm";
-                        objTint.r = 100; objTint.g = 100; objTint.b = 100;
-                        break;
-                }
-                
-                if (objName) {
-                    SDL_Texture *objTex = resGetTexture(objName);
-                    if (objTex) {
-                        SDL_SetTextureColorMod(objTex, objTint.r, objTint.g, objTint.b);
-                        
-                        // Calculate position centered on tile
-                        int objWorldX = tx * tileW + tileW/2;
-                        int objWorldY = ty * tileH + tileH/2;
-                        
-                        // Draw the object
-                        drawTexture(objName, objWorldX, objWorldY, ANCHOR_NONE, NULL);
-                        
-                        // Reset color mod
-                        SDL_SetTextureColorMod(objTex, 255, 255, 255);
-                    }
-                }
-            }
-        }
-    }
+
+    SDL_RenderGeometry(renderer, terrainTexture, meshVertices, meshVertexCount, NULL, 0);
+
+    SDL_Color textColor = {220, 230, 240, 255};
+    drawText("default_font", 18, 18, ANCHOR_TOP_L, textColor,
+             "W/S tilt  A/D orbit  Wheel amplitude  Enter reset");
+
+    drawText("default_font", 18, 40, ANCHOR_TOP_L, textColor,
+             "Amplitude: %.2f  Speed: %.2f  FPS: %d",
+             amplitude, animationSpeed, getFPS());
 }
 
-static void renderUI(SDL_Renderer *r) {
-    // UI elements (drawn on top of everything)
-    SDL_Color white = {255, 255, 255, 255};
-    
-    // Coconut counter (top right)
-    drawTexture("coconut", WINW - 30, 20, ANCHOR_TOP_R, NULL);
-    drawText("default_font", WINW - 40, 20, ANCHOR_TOP_R, white, "%d", coconutCount);
-    
-    // Zoom level indicator (top left)
-    drawText("default_font", 10, 10, ANCHOR_TOP_L, white, "Zoom: %.1fx", ZOOM);
-    
-    // Instructions (bottom center)
-    drawText("default_font", WINW/2, WINH - 10, ANCHOR_MID_BOT, white, 
-             "WASD/Edge pan - Move | Mouse Wheel - Zoom | Click - Place tiles");
+static void shutdownTerrain(void) {
+    free(meshVertices);
+    meshVertices = NULL;
 }
 
-static void gameRender(SDL_Renderer *r) {
-    // Render world (terrain + objects)
-    renderWorld(r);
-    
-    // Render UI on top
-    renderUI(r);
-}
+void gameInit(void) {
+    titleSet("FastNoise Terrain");
 
-void gameInit() {
-    // Get tile dimensions from water texture
-    SDL_Texture *waterTex = resGetTexture("water");
-    SDL_QueryTexture(waterTex, NULL, NULL, &tileW, &tileH);
-    
-    // Create a large world
-    tilesX = 100;
-    tilesY = 100;
-    
-    tiles = malloc(sizeof(Tile) * tilesX * tilesY);
-    coconutCount = 10; // Start with some coconuts
-    
-    // Initialize camera to center of world
-    XOFF = (tilesX * tileW) / 2;
-    YOFF = (tilesY * tileH) / 2;
-    
-    // Set initial zoom
-    ZOOM = 1.0f;
-    
-    // Initialize world with water and a central island
-    for (int ty = 0; ty < tilesY; ty++) {
-        for (int tx = 0; tx < tilesX; tx++) {
-            Tile *t = &tiles[ty * tilesX + tx];
-            
-            // Create island in the center
-            float distFromCenter = sqrtf((tx - tilesX/2) * (tx - tilesX/2) + (ty - tilesY/2) * (ty - tilesY/2));
-            
-            if (distFromCenter < 5) {
-                t->type = TILE_SAND;
-            } else if (distFromCenter < 15) {
-                t->type = (rand() % 3 == 0) ? TILE_SAND : TILE_WATER;
-            } else {
-                t->type = TILE_WATER;
-            }
-            
-            t->obj = OBJ_NONE;
-            t->timer = 0;
+    fnl_state state = fnlCreateState();
+    state.seed = 1337;
+    state.frequency = 0.35f;
+    state.noise_type = FNL_NOISE_OPENSIMPLEX2;
+    state.fractal_type = FNL_FRACTAL_RIDGED;
+    state.octaves = 5;
+    state.lacunarity = 2.0f;
+    state.gain = 0.45f;
+    state.weighted_strength = 0.35f;
+    noiseState = state;
+
+    meshVertexCount = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * 6;
+    meshVertices = malloc(sizeof(SDL_Vertex) * meshVertexCount);
+
+    float minCoord = -PLANE_EXTENT * 0.5f;
+    float maxCoord = PLANE_EXTENT * 0.5f;
+
+    for (int gz = 0; gz < GRID_RESOLUTION; ++gz) {
+        for (int gx = 0; gx < GRID_RESOLUTION; ++gx) {
+            float tX = (float)gx / (float)(GRID_RESOLUTION - 1);
+            float tZ = (float)gz / (float)(GRID_RESOLUTION - 1);
+
+            GridPoint gp;
+            gp.x = minCoord + (maxCoord - minCoord) * tX;
+            gp.z = minCoord + (maxCoord - minCoord) * tZ;
+            gp.u = tX * 4.0f;
+            gp.v = tZ * 4.0f;
+            gridPoints[pointIndex(gx, gz)] = gp;
         }
     }
-    
-    // Add a tree in the center
-    int centerX = tilesX / 2;
-    int centerY = tilesY / 2;
-    Tile *center = &tiles[centerY * tilesX + centerX];
-    center->type = TILE_SAND;
-    center->obj = OBJ_TREE;
-    center->timer = 0;
 
-    // Register game functions
+    terrainTexture = resGetTexture("terrain_diffuse");
+    if (!terrainTexture) {
+        terrainTexture = resGetTexture("sand");
+    }
+    if (terrainTexture) {
+        SDL_SetTextureScaleMode(terrainTexture, SDL_ScaleModeBest);
+    }
+
+    animationTime = 0.0f;
+    updateHeightMap(animationTime);
+    rebuildMesh();
+
+    renderF_add(renderTerrain);
     tickF_add(gameTick);
-    renderF_add(gameRender);
 
-    // Create UI buttons (positioned properly)
-    int handler = initUiHandler((RECT){10, WINH - 90, WINW - 20, 80});
-    int buttonSize = 70;
-    int gap = 10;
-    const char *labels[] = {"Grass", "Water", "Sand", "Stone", "Dirt"};
-    int types[] = {TILE_GRASS, TILE_WATER, TILE_SAND, TILE_STONE, TILE_DIRT};
-    
-    // Calculate total width needed for buttons
-    int totalWidth = 5 * buttonSize + 4 * gap;
-    int startX = (WINW - totalWidth) / 2;
-    
-    for (int i = 0; i < 5; i++) {
-        RECT br = {startX + i * (buttonSize + gap), WINH - 80, buttonSize, buttonSize};
-        TileButton *tb = newTileButton(br, types[i], labels[i]);
-        addElem(&ui[handler], (Elem *)tb);
-    }
+    atexit(shutdownTerrain);
 }
