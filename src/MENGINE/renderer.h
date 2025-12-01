@@ -4,6 +4,7 @@
 
 #include <SDL.h>
 #include "mutil.h"
+#include <SDL_opengl.h>
 
 // Anchor points for UI positioning
 typedef enum {
@@ -32,6 +33,7 @@ E D ZOOM;       // World zoom
 E D UIZOOM;     // UI zoom
 E SDL_Window *window;
 E SDL_Renderer *renderer;
+E SDL_GLContext gl_context;
 
 // Window management
 V titleSet(const C* title);              // Set window title

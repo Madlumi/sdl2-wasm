@@ -1,6 +1,7 @@
 
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_opengl.h>
 #include "mutil.h"
 #include "renderer.h"
 #include "debug.h"
@@ -16,6 +17,7 @@ D ZOOM = 1.0;
 D UIZOOM = 1.0;
 SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL;
+SDL_GLContext gl_context = NULL;
 
 // FPS control variables
 static Uint32 frameStart = 0;
@@ -93,33 +95,47 @@ B renderInit(I w, I h, const C* title) {
         THROW("SDL_Init Error: %s\n", SDL_GetError());
         return false;
     }
-    
-    window = SDL_CreateWindow(title, 
-                             SDL_WINDOWPOS_CENTERED, 
+
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+    window = SDL_CreateWindow(title,
+                             SDL_WINDOWPOS_CENTERED,
                              SDL_WINDOWPOS_CENTERED,
                              w, h,
-                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN);
-    
+                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN);
+
     if (!window) {
         THROW("SDL_CreateWindow Error: %s\n", SDL_GetError());
         return false;
     }
-    
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer) {
-        THROW("SDL_CreateRenderer Error: %s\n", SDL_GetError());
+
+    gl_context = SDL_GL_CreateContext(window);
+    if (!gl_context) {
+        THROW("SDL_GL_CreateContext Error: %s\n", SDL_GetError());
         SDL_DestroyWindow(window);
         window = NULL;
         return false;
     }
-    
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    
+
+    SDL_GL_SetSwapInterval(1);
+
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (renderer) {
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    }
+
     // Initialize window size variables
     renderUpdateWindowSize();
-    
+
     // Load resources AFTER renderer is created
     resLoadAll(renderer);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
     
     // Initialize FPS tracking
     frameStart = SDL_GetTicks();
@@ -129,6 +145,11 @@ B renderInit(I w, I h, const C* title) {
 }
 
 V renderFree() {
+    if (gl_context) {
+        SDL_GL_DeleteContext(gl_context);
+        gl_context = NULL;
+    }
+
     if (renderer) {
         SDL_DestroyRenderer(renderer);
         renderer = NULL;
@@ -173,17 +194,16 @@ I getFPS() {
 V render() {
     // Always check current window size before rendering
     renderUpdateWindowSize();
-    
-    // Clear with a dark background
-    SDL_SetRenderDrawColor(renderer, 0, 20, 40, 255);
-    SDL_RenderClear(renderer);
-    
-    // Execute all render callbacks
+
+    glViewport(0, 0, WINW, WINH);
+    glClearColor(0.02f, 0.06f, 0.1f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Execute all render callbacks (they can issue OpenGL calls)
     FOR(renderF_num, { renderF_pool[i](renderer); });
-    
-    // Present the rendered frame
-    SDL_RenderPresent(renderer);
-    
+
+    SDL_GL_SwapWindow(window);
+
     // Cap frame rate if needed
     capFPS();
 }

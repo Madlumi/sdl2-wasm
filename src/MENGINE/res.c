@@ -72,9 +72,11 @@ void resLoadAll(SDL_Renderer *r){
         image_list[i].surface = IMG_Load(image_list[i].path);
         if(image_list[i].surface) {
             printf("  Success! Dimensions: %dx%d\n", image_list[i].surface->w, image_list[i].surface->h);
-            image_list[i].tex = SDL_CreateTextureFromSurface(r, image_list[i].surface);
-            if (!image_list[i].tex) {
-                printf("  Failed to create texture: %s\n", SDL_GetError());
+            if (r) {
+                image_list[i].tex = SDL_CreateTextureFromSurface(r, image_list[i].surface);
+                if (!image_list[i].tex) {
+                    printf("  Failed to create texture: %s\n", SDL_GetError());
+                }
             }
         } else {
             printf("  Failed to load image: %s\n", IMG_GetError());
