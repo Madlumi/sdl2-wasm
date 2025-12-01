@@ -1,6 +1,7 @@
 
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_opengl.h>
 #include "mutil.h"
 #include "renderer.h"
 #include "debug.h"
@@ -16,6 +17,9 @@ D ZOOM = 1.0;
 D UIZOOM = 1.0;
 SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL;
+static SDL_GLContext gl_context = NULL;
+static int useOpenGL = 0;
+static void (*glRenderFunc)(void) = NULL;
 
 // FPS control variables
 static Uint32 frameStart = 0;
@@ -94,11 +98,11 @@ B renderInit(I w, I h, const C* title) {
         return false;
     }
     
-    window = SDL_CreateWindow(title, 
-                             SDL_WINDOWPOS_CENTERED, 
+    window = SDL_CreateWindow(title,
+                             SDL_WINDOWPOS_CENTERED,
                              SDL_WINDOWPOS_CENTERED,
                              w, h,
-                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN);
+                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL);
     
     if (!window) {
         THROW("SDL_CreateWindow Error: %s\n", SDL_GetError());
@@ -128,10 +132,57 @@ B renderInit(I w, I h, const C* title) {
     return true;
 }
 
+B renderInitGL(I w, I h, const C* title) {
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        THROW("SDL_Init Error: %s\n", SDL_GetError());
+        return false;
+    }
+
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+    window = SDL_CreateWindow(title,
+                             SDL_WINDOWPOS_CENTERED,
+                             SDL_WINDOWPOS_CENTERED,
+                             w, h,
+                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL);
+
+    if (!window) {
+        THROW("SDL_CreateWindow Error: %s\n", SDL_GetError());
+        return false;
+    }
+
+    gl_context = SDL_GL_CreateContext(window);
+    if (!gl_context) {
+        THROW("SDL_GL_CreateContext Error: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window);
+        window = NULL;
+        return false;
+    }
+
+    SDL_GL_MakeCurrent(window, gl_context);
+    SDL_GL_SetSwapInterval(1);
+
+    useOpenGL = 1;
+
+    renderUpdateWindowSize();
+
+    frameStart = SDL_GetTicks();
+    fpsLastTime = frameStart;
+    return true;
+}
+
 V renderFree() {
     if (renderer) {
         SDL_DestroyRenderer(renderer);
         renderer = NULL;
+    }
+
+    if (gl_context) {
+        SDL_GL_DeleteContext(gl_context);
+        gl_context = NULL;
     }
     
     if (window) {
@@ -144,6 +195,10 @@ V renderFree() {
 
 V setTargetFPS(I fps) {
     targetFPS = fps > 0 ? fps : 60;
+}
+
+V setGLRenderer(void (*fn)(void)) {
+    glRenderFunc = fn;
 }
 
 V capFPS() {
@@ -173,17 +228,26 @@ I getFPS() {
 V render() {
     // Always check current window size before rendering
     renderUpdateWindowSize();
-    
+
+    if (useOpenGL) {
+        if (glRenderFunc) {
+            glRenderFunc();
+            SDL_GL_SwapWindow(window);
+        }
+        capFPS();
+        return;
+    }
+
     // Clear with a dark background
     SDL_SetRenderDrawColor(renderer, 0, 20, 40, 255);
     SDL_RenderClear(renderer);
-    
+
     // Execute all render callbacks
     FOR(renderF_num, { renderF_pool[i](renderer); });
-    
+
     // Present the rendered frame
     SDL_RenderPresent(renderer);
-    
+
     // Cap frame rate if needed
     capFPS();
 }

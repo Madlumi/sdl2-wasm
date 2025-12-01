@@ -38,7 +38,9 @@ V titleSet(const C* title);              // Set window title
 V setWindowflags(U32 flags);             // Set window flags  
 V setRenderflags(U32 flags);             // Set renderer flags
 B renderInit(I w, I h, const C* title);  // Initialize renderer
+B renderInitGL(I w, I h, const C* title); // Initialize renderer with an OpenGL context
 V renderFree();                          // Cleanup renderer
+V setGLRenderer(void (*fn)(void));        // Provide the OpenGL render callback
 
 // Frame rate control
 V setTargetFPS(I fps);                   // Set target frames per second
