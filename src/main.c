@@ -5,15 +5,14 @@
 #include "keys.h"
 #include "tick.h"
 #include "renderer.h"
-#include "res.h"
 #include "EGAME/game.h"
 int running=1;
 
-void quit(){ renderFree(); SDL_Quit(); running=0; }
+void quit(){ renderFree(); running=0; }
 
 void init(){
    keysInit();
-   renderInit(512,512, "island");
+   renderInitGL(1024,768, "Wolf3D GL");
    gameInit();
 }
 
