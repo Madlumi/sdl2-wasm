@@ -3,6 +3,7 @@
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
 #include <math.h>
+#include <stdlib.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -14,6 +15,11 @@ typedef struct {
     Vec3 verts[4];
     SDL_Color color;
 } WallFace;
+
+typedef struct {
+    int index;
+    float depth;
+} FaceDepth;
 
 static const char *LEVEL[] = {
     "1111111111",
@@ -34,10 +40,19 @@ static const float WALL_HEIGHT = 1.5f;
 static WallFace faces[MAP_W * MAP_H * 6];
 static int faceCount = 0;
 
-static Vec3 camPos = {5.0f, 0.4f, 5.0f};
+static Vec3 camPos = {1.5f, 0.4f, 1.5f};
 static float camYaw = 0.0f;
 static float camPitch = 0.0f;
 static float fov = 75.0f * (float)M_PI / 180.0f;
+
+static int compareFaceDepth(const void *a, const void *b) {
+    float da = ((const FaceDepth *)a)->depth;
+    float db = ((const FaceDepth *)b)->depth;
+    // Draw farthest faces first (Painter's algorithm)
+    if (da < db) return 1;
+    if (da > db) return -1;
+    return 0;
+}
 
 static int isWall(int x, int z) {
     if (x < 0 || z < 0 || x >= MAP_W || z >= MAP_H) return 1;
@@ -208,7 +223,8 @@ static void drawFloor(SDL_Renderer *renderer, Vec3 forward, Vec3 right, Vec3 upV
 
 void wolf3dInit() {
     buildLevel();
-    camPos = v3(2.5f, 0.4f, 2.5f);
+    // Start inside an open hallway instead of intersecting a wall tile.
+    camPos = v3(1.5f, 0.4f, 1.5f);
     camYaw = 0.0f;
     camPitch = 0.0f;
 }
@@ -249,9 +265,20 @@ void wolf3dRender(SDL_Renderer *renderer) {
     Vec3 right = v3(cosf(camYaw + (float)M_PI * 0.5f), 0.0f, sinf(camYaw + (float)M_PI * 0.5f));
     Vec3 upVec = v3_cross(right, forward);
 
+    FaceDepth order[MAP_W * MAP_H * 6];
+    for (int i = 0; i < faceCount; i++) {
+        Vec3 c = v3_scale(v3_add(v3_add(faces[i].verts[0], faces[i].verts[1]), v3_add(faces[i].verts[2], faces[i].verts[3])),
+                          0.25f);
+        float depth = v3_dot(v3_sub(c, camPos), forward);
+        order[i].index = i;
+        order[i].depth = depth;
+    }
+
+    qsort(order, faceCount, sizeof(FaceDepth), compareFaceDepth);
+
     drawFloor(renderer, forward, right, upVec);
     for (int i = 0; i < faceCount; i++) {
-        drawQuad(renderer, &faces[i], forward, right, upVec);
+        drawQuad(renderer, &faces[order[i].index], forward, right, upVec);
     }
 
     SDL_Color white = {255, 255, 255, 255};
