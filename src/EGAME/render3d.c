@@ -112,6 +112,8 @@ void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rota
             float t = (mesh->uvs && idx < mesh->vertCount) ? mesh->uvs[idx].y : 0.0f;
             float uWrap = u - floorf(u);
             float tWrap = t - floorf(t);
+            if (uWrap == 0.0f && u > 0.0f) uWrap = 1.0f;
+            if (tWrap == 0.0f && t > 0.0f) tWrap = 1.0f;
             tri[triCount].tex_coord.x = uWrap;
             tri[triCount].tex_coord.y = tWrap;
 
