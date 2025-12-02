@@ -169,8 +169,8 @@ void playerRender(SDL_Renderer *r) {
         if (alphaRatio < 0.0f) alphaRatio = 0.0f;
         SDL_Color textColor = {255, 255, 255, (Uint8)(255 * alphaRatio)};
         float rise = expPopup.baseOffset + expPopup.riseSpeed * expPopup.timer;
-        int tx, ty;
-        worldToScreen(player.body.x, player.body.y - player.body.halfH - rise, &tx, &ty);
+        int tx = (int)(player.body.x);
+        int ty = (int)(player.body.y - player.body.halfH - rise);
         drawText("default_font", tx, ty, ANCHOR_NONE, textColor, "+1 exp");
     }
 }

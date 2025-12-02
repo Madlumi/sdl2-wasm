@@ -45,20 +45,20 @@ void gameuiRender(SDL_Renderer *r) {
     for (int i = 0; i < hotbarSlots; i++) {
         int sx = startX + i * (slotSize + slotSpacing);
         int sy = startY;
-        drawRect(sx, sy, slotSize, slotSize, ANCHOR_NONE,
+        drawRect(sx, sy, slotSize, slotSize, ANCHOR_TOP_L,
                  i == 0 ? slotHighlight : slotOutline);
-        drawRect(sx + 2, sy + 2, slotSize - 4, slotSize - 4, ANCHOR_NONE, slotBg);
+        drawRect(sx + 2, sy + 2, slotSize - 4, slotSize - 4, ANCHOR_TOP_L, slotBg);
 
         if (i == 0) {
             int iconLeft = sx + 6;
             int iconTop = sy + 6;
             int iconW = slotSize - 12;
             int iconH = slotSize - 14;
-            drawRect(iconLeft, iconTop + 2, iconW, iconH, ANCHOR_NONE, woodShadow);
-            drawRect(iconLeft + 2, iconTop, iconW - 4, iconH - 4, ANCHOR_NONE, woodColor);
-            drawRect(iconLeft + 4, iconTop + iconH / 2 - 4, iconW - 8, 4, ANCHOR_NONE,
+            drawRect(iconLeft, iconTop + 2, iconW, iconH, ANCHOR_TOP_L, woodShadow);
+            drawRect(iconLeft + 2, iconTop, iconW - 4, iconH - 4, ANCHOR_TOP_L, woodColor);
+            drawRect(iconLeft + 4, iconTop + iconH / 2 - 4, iconW - 8, 4, ANCHOR_TOP_L,
                      woodRings);
-            drawRect(iconLeft + 4, iconTop + iconH / 2 + 2, iconW - 12, 3, ANCHOR_NONE,
+            drawRect(iconLeft + 4, iconTop + iconH / 2 + 2, iconW - 12, 3, ANCHOR_TOP_L,
                      woodShadow);
 
             drawText("default_font", sx + slotSize - 6, sy + slotSize - 6, ANCHOR_BOT_R,
