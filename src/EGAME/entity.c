@@ -1,6 +1,44 @@
 #include "entity.h"
 #include "world.h"
+#include "../MENGINE/renderer.h"
 #include <math.h>
+
+void healthInit(Health *health, int max) {
+    if (!health) return;
+    health->max = max;
+    health->current = max;
+}
+
+int healthIsDepleted(const Health *health) { return !health || health->current <= 0; }
+
+void healthApplyDamage(Health *health, int amount) {
+    if (!health || amount <= 0) return;
+    health->current -= amount;
+    if (health->current < 0) health->current = 0;
+}
+
+float healthRatio(const Health *health) {
+    if (!health || health->max <= 0) return 0.0f;
+    return (float)health->current / (float)health->max;
+}
+
+void healthbarRender(const Entity *anchor, const Health *health, const HealthBar *bar) {
+    if (!anchor || !health || !bar) return;
+
+    float ratio = healthRatio(health);
+    int totalW = (int)bar->width;
+    int totalH = (int)bar->height;
+
+    int left = (int)(anchor->x - totalW * 0.5f);
+    int top = (int)(anchor->y - anchor->halfH - bar->yOffset - totalH);
+
+    SDL_Color bg = bar->backColor;
+    SDL_Color fg = bar->fillColor;
+
+    drawRect(left, top, totalW, totalH, ANCHOR_NONE, bg);
+    drawRect(left + 1, top + 1, (int)((totalW - 2) * ratio), totalH - 2, ANCHOR_NONE,
+             fg);
+}
 
 static int tileSpan(float start, float end, int size, int *outMin, int *outMax) {
     *outMin = (int)floorf(start / size);
