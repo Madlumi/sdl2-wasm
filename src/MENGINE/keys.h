@@ -5,6 +5,7 @@
 E POINT mpos;
 enum KEYMAP{
     INP_W,
+    INP_SPACE,
     INP_S,
     INP_D,
     INP_A,

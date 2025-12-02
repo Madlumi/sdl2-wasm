@@ -26,6 +26,7 @@ I mouseWheelMoved=0;
 #define  MAX_KEYBINDS 2
 I keyBinds[INP_TOTS][MAX_KEYBINDS] = {
    [INP_W]     = { SDL_SCANCODE_W, SDL_SCANCODE_UP },
+   [INP_SPACE]     = { SDL_SCANCODE_SPACE, -1 },
    [INP_S]     = { SDL_SCANCODE_S, SDL_SCANCODE_DOWN },
    [INP_D]     = { SDL_SCANCODE_D, SDL_SCANCODE_RIGHT },
    [INP_A]     = { SDL_SCANCODE_A, SDL_SCANCODE_LEFT },
