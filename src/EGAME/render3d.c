@@ -48,30 +48,6 @@ static void cameraBasis(Vec3 *forward, Vec3 *right, Vec3 *upVec) {
     if (upVec) *upVec = u;
 }
 
-static int projectPoint(Vec3 p, SDL_FPoint *out, float *depth) {
-    Vec3 forward, right, upVec;
-    cameraBasis(&forward, &right, &upVec);
-
-    Vec3 rel = v3_sub(p, gCamera.position);
-    float viewX = v3_dot(rel, right);
-    float viewY = v3_dot(rel, upVec);
-    float viewZ = v3_dot(rel, forward);
-
-    const float NEAR_PLANE = 0.05f;
-    if (viewZ <= NEAR_PLANE) return 0;
-
-    float aspect = (float)WINW / (float)WINH;
-    float f = 1.0f / tanf(gCamera.fov * 0.5f);
-
-    float nx = (viewX * f / aspect) / viewZ;
-    float ny = (viewY * f) / viewZ;
-
-    out->x = (nx * 0.5f + 0.5f) * WINW;
-    out->y = (1.0f - (ny * 0.5f + 0.5f)) * WINH;
-    if (depth) *depth = viewZ;
-    return 1;
-}
-
 float render3dMeshDepth(const Mesh *mesh, Vec3 position, Vec3 rotation) {
     if (!mesh || !mesh->verts || mesh->vertCount == 0) return 0.0f;
     Vec3 forward;
@@ -89,14 +65,21 @@ float render3dMeshDepth(const Mesh *mesh, Vec3 position, Vec3 rotation) {
 void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rotation, SDL_Color baseColor) {
     if (!renderer || !mesh || !mesh->verts || mesh->indexCount % 3 != 0) return;
 
-    int vertTotal = mesh->indexCount;
+    int vertTotal = mesh->indexCount * 2; // allow room for clipped triangles
     SDL_Vertex *verts = calloc((size_t)vertTotal, sizeof(SDL_Vertex));
     if (!verts) return;
 
+    Vec3 forward, right, upVec;
+    cameraBasis(&forward, &right, &upVec);
+    const float NEAR_PLANE = 0.05f;
+    float aspect = (float)WINW / (float)WINH;
+    float f = 1.0f / tanf(gCamera.fov * 0.5f);
+
     int v = 0;
     for (int i = 0; i < mesh->indexCount; i += 3) {
-        SDL_Vertex tri[3];
-        int triCount = 0;
+        typedef struct { float x, y, z, u, t; } ViewVert;
+        ViewVert in[3];
+        int inCount = 0;
 
         for (int j = 0; j < 3; j++) {
             int idx = mesh->indices ? mesh->indices[i + j] : (i + j);
@@ -105,31 +88,70 @@ void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rota
             Vec3 world = rotateVector(mesh->verts[idx], rotation);
             world = v3_add(world, position);
 
-            float depth;
-            if (!projectPoint(world, &tri[triCount].position, &depth)) { triCount = -1; break; }
-
             float u = (mesh->uvs && idx < mesh->vertCount) ? mesh->uvs[idx].x : 0.0f;
             float t = (mesh->uvs && idx < mesh->vertCount) ? mesh->uvs[idx].y : 0.0f;
-            float uWrap = u - floorf(u);
-            float tWrap = t - floorf(t);
-            if (uWrap == 0.0f && u > 0.0f) uWrap = 1.0f;
-            if (tWrap == 0.0f && t > 0.0f) tWrap = 1.0f;
-            tri[triCount].tex_coord.x = uWrap;
-            tri[triCount].tex_coord.y = tWrap;
-
-            float rScale = 0.5f + uWrap * 0.5f;
-            float gScale = 0.5f + tWrap * 0.5f;
-            float bScale = 0.35f + (1.0f - (uWrap + tWrap) * 0.5f) * 0.35f;
-            tri[triCount].color.r = (Uint8)fminf(255.0f, baseColor.r * rScale);
-            tri[triCount].color.g = (Uint8)fminf(255.0f, baseColor.g * gScale);
-            tri[triCount].color.b = (Uint8)fminf(255.0f, baseColor.b * bScale);
-            tri[triCount].color.a = baseColor.a;
-            triCount++;
+            Vec3 rel = v3_sub(world, gCamera.position);
+            in[inCount].x = v3_dot(rel, right);
+            in[inCount].y = v3_dot(rel, upVec);
+            in[inCount].z = v3_dot(rel, forward);
+            in[inCount].u = u;
+            in[inCount].t = t;
+            inCount++;
         }
 
-        if (triCount == 3) {
-            for (int j = 0; j < 3; j++) {
-                verts[v++] = tri[j];
+        if (inCount < 3) continue;
+
+        ViewVert clipped[6];
+        int clipCount = 0;
+
+        for (int j = 0; j < inCount; j++) {
+            ViewVert cur = in[j];
+            ViewVert prev = in[(j + inCount - 1) % inCount];
+            int curInside = cur.z >= NEAR_PLANE;
+            int prevInside = prev.z >= NEAR_PLANE;
+
+            if (curInside != prevInside) {
+                float t = (NEAR_PLANE - prev.z) / (cur.z - prev.z);
+                ViewVert inter;
+                inter.x = prev.x + (cur.x - prev.x) * t;
+                inter.y = prev.y + (cur.y - prev.y) * t;
+                inter.z = NEAR_PLANE;
+                inter.u = prev.u + (cur.u - prev.u) * t;
+                inter.t = prev.t + (cur.t - prev.t) * t;
+                if (clipCount < (int)(sizeof(clipped) / sizeof(clipped[0]))) clipped[clipCount++] = inter;
+            }
+
+            if (curInside) {
+                if (clipCount < (int)(sizeof(clipped) / sizeof(clipped[0]))) clipped[clipCount++] = cur;
+            }
+        }
+
+        if (clipCount < 3) continue;
+
+        for (int j = 1; j < clipCount - 1; j++) {
+            ViewVert tri[3] = {clipped[0], clipped[j], clipped[j + 1]};
+            for (int k = 0; k < 3; k++) {
+                float uWrap = tri[k].u - floorf(tri[k].u);
+                float tWrap = tri[k].t - floorf(tri[k].t);
+                if (uWrap == 0.0f && tri[k].u > 0.0f) uWrap = 1.0f;
+                if (tWrap == 0.0f && tri[k].t > 0.0f) tWrap = 1.0f;
+
+                float nx = (tri[k].x * f / aspect) / tri[k].z;
+                float ny = (tri[k].y * f) / tri[k].z;
+
+                verts[v].position.x = (nx * 0.5f + 0.5f) * WINW;
+                verts[v].position.y = (1.0f - (ny * 0.5f + 0.5f)) * WINH;
+                verts[v].tex_coord.x = uWrap;
+                verts[v].tex_coord.y = tWrap;
+
+                float rScale = 0.5f + uWrap * 0.5f;
+                float gScale = 0.5f + tWrap * 0.5f;
+                float bScale = 0.35f + (1.0f - (uWrap + tWrap) * 0.5f) * 0.35f;
+                verts[v].color.r = (Uint8)fminf(255.0f, baseColor.r * rScale);
+                verts[v].color.g = (Uint8)fminf(255.0f, baseColor.g * gScale);
+                verts[v].color.b = (Uint8)fminf(255.0f, baseColor.b * bScale);
+                verts[v].color.a = baseColor.a;
+                v++;
             }
         }
     }
