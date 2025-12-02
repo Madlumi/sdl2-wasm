@@ -1,5 +1,6 @@
-#include "wolf3d.h"
 #include "../MENGINE/keys.h"
+#include "../MENGINE/keys.h"
+#include "../MENGINE/render3d.h"
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
 #include <math.h>
@@ -8,18 +9,6 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
-
-typedef struct { float x, y, z; } Vec3;
-
-typedef struct {
-    Vec3 verts[4];
-    SDL_Color color;
-} WallFace;
-
-typedef struct {
-    int index;
-    float depth;
-} FaceDepth;
 
 static const char *LEVEL[] = {
     "1111111111",
@@ -37,193 +26,95 @@ static const char *LEVEL[] = {
 static const float TILE_SIZE = 1.0f;
 static const float WALL_HEIGHT = 1.5f;
 
-static WallFace faces[MAP_W * MAP_H * 6];
-static int faceCount = 0;
-
 static Vec3 camPos = {1.5f, 0.4f, 1.5f};
 static float camYaw = 0.0f;
 static float camPitch = 0.0f;
-static float fov = 75.0f * (float)M_PI / 180.0f;
+static float fov = 75.0f;
 
-static int compareFaceDepth(const void *a, const void *b) {
-    float da = ((const FaceDepth *)a)->depth;
-    float db = ((const FaceDepth *)b)->depth;
-    // Draw farthest faces first (Painter's algorithm)
-    if (da < db) return 1;
-    if (da > db) return -1;
-    return 0;
-}
+typedef struct {
+    const Mesh *mesh;
+    Vec3 position;
+    Vec3 rotation;
+    Vec3 scale;
+    SDL_Color tint;
+    float depth;
+} MeshInstance;
+
+static MeshInstance instances[MAP_W * MAP_H * 8];
+static int instanceCount = 0;
+
+static const Vertex3D WALL_VERTS[] = {
+    {{-0.5f, 0.0f, 0.0f}, {0.0f, 1.0f}},
+    {{0.5f, 0.0f, 0.0f}, {1.0f, 1.0f}},
+    {{0.5f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+    {{-0.5f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+};
+
+static const U32 WALL_INDICES[] = {0, 1, 2, 0, 2, 3};
+static const Mesh WALL_MESH = {WALL_VERTS, WALL_INDICES, 4, 6};
+
+static const Vertex3D FLOOR_VERTS[] = {
+    {{-0.5f, 0.0f, -0.5f}, {0.0f, 0.0f}},
+    {{0.5f, 0.0f, -0.5f}, {1.0f, 0.0f}},
+    {{0.5f, 0.0f, 0.5f}, {1.0f, 1.0f}},
+    {{-0.5f, 0.0f, 0.5f}, {0.0f, 1.0f}},
+};
+
+static const Mesh FLOOR_MESH = {FLOOR_VERTS, WALL_INDICES, 4, 6};
 
 static int isWall(int x, int z) {
     if (x < 0 || z < 0 || x >= MAP_W || z >= MAP_H) return 1;
     return LEVEL[z][x] == '1';
 }
 
-static Vec3 v3(float x, float y, float z) { Vec3 v = {x, y, z}; return v; }
-
-static Vec3 v3_sub(Vec3 a, Vec3 b) { return v3(a.x - b.x, a.y - b.y, a.z - b.z); }
-static float v3_dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-static Vec3 v3_cross(Vec3 a, Vec3 b) {
-    return v3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
-}
-static Vec3 v3_add(Vec3 a, Vec3 b) { return v3(a.x + b.x, a.y + b.y, a.z + b.z); }
-static Vec3 v3_scale(Vec3 a, float s) { return v3(a.x * s, a.y * s, a.z * s); }
-
-static void addFace(Vec3 v0, Vec3 v1, Vec3 v2, Vec3 v3, SDL_Color color) {
-    if (faceCount >= (int)(sizeof(faces) / sizeof(faces[0]))) return;
-    faces[faceCount].verts[0] = v0;
-    faces[faceCount].verts[1] = v1;
-    faces[faceCount].verts[2] = v2;
-    faces[faceCount].verts[3] = v3;
-    faces[faceCount].color = color;
-    faceCount++;
+static void addInstance(const Mesh *mesh, Vec3 pos, Vec3 rot, Vec3 scale, SDL_Color tint) {
+    if (instanceCount >= (int)(sizeof(instances) / sizeof(instances[0]))) return;
+    instances[instanceCount].mesh = mesh;
+    instances[instanceCount].position = pos;
+    instances[instanceCount].rotation = rot;
+    instances[instanceCount].scale = scale;
+    instances[instanceCount].tint = tint;
+    instances[instanceCount].depth = 0.0f;
+    instanceCount++;
 }
 
 static void buildLevel(void) {
-    faceCount = 0;
+    instanceCount = 0;
+    SDL_Color base = {180, 180, 200, 255};
+    SDL_Color shadow = {140, 140, 170, 255};
+    SDL_Color light = {220, 220, 240, 255};
+
+    // Floor and ceiling as single large quads
+    Vec3 center = v3(MAP_W * TILE_SIZE * 0.5f, 0.0f, MAP_H * TILE_SIZE * 0.5f);
+    addInstance(&FLOOR_MESH, center, v3(0, 0, 0), v3(MAP_W * TILE_SIZE, 1.0f, MAP_H * TILE_SIZE), (SDL_Color){70, 90, 110, 255});
+    addInstance(&FLOOR_MESH, v3_add(center, v3(0, WALL_HEIGHT, 0)), v3((float)M_PI, 0, 0),
+                v3(MAP_W * TILE_SIZE, 1.0f, MAP_H * TILE_SIZE), (SDL_Color){40, 45, 65, 255});
+
     for (int z = 0; z < MAP_H; z++) {
         for (int x = 0; x < MAP_W; x++) {
             if (!isWall(x, z)) continue;
-            float fx = x * TILE_SIZE;
-            float fz = z * TILE_SIZE;
-            SDL_Color base = {180, 180, 200, 255};
-            SDL_Color shadow = {140, 140, 170, 255};
-            SDL_Color light = {220, 220, 240, 255};
+            float fx = (x + 0.5f) * TILE_SIZE;
+            float fz = (z + 0.5f) * TILE_SIZE;
+            Vec3 wallScale = v3(TILE_SIZE, WALL_HEIGHT, 1.0f);
 
             if (!isWall(x, z - 1)) {
-                addFace(v3(fx, 0, fz), v3(fx + TILE_SIZE, 0, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), v3(fx, WALL_HEIGHT, fz), base);
+                addInstance(&WALL_MESH, v3(fx, WALL_HEIGHT * 0.5f, z * TILE_SIZE), v3(0, 0, 0), wallScale, base);
             }
             if (!isWall(x + 1, z)) {
-                addFace(v3(fx + TILE_SIZE, 0, fz), v3(fx + TILE_SIZE, 0, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), light);
+                addInstance(&WALL_MESH, v3((x + 1) * TILE_SIZE, WALL_HEIGHT * 0.5f, fz), v3(0, (float)M_PI * 0.5f, 0), wallScale, light);
             }
             if (!isWall(x, z + 1)) {
-                addFace(v3(fx + TILE_SIZE, 0, fz + TILE_SIZE), v3(fx, 0, fz + TILE_SIZE), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), base);
+                addInstance(&WALL_MESH, v3(fx, WALL_HEIGHT * 0.5f, (z + 1) * TILE_SIZE), v3(0, (float)M_PI, 0), wallScale, base);
             }
             if (!isWall(x - 1, z)) {
-                addFace(v3(fx, 0, fz + TILE_SIZE), v3(fx, 0, fz), v3(fx, WALL_HEIGHT, fz), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), shadow);
+                addInstance(&WALL_MESH, v3(x * TILE_SIZE, WALL_HEIGHT * 0.5f, fz), v3(0, (float)-M_PI * 0.5f, 0), wallScale, shadow);
             }
-            addFace(v3(fx, WALL_HEIGHT, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), light);
         }
     }
-}
-
-static int projectPoint(Vec3 p, SDL_FPoint *out, float *depth, Vec3 forward, Vec3 right, Vec3 upVec, float aspect) {
-    Vec3 rel = v3_sub(p, camPos);
-    float viewX = v3_dot(rel, right);
-    float viewY = v3_dot(rel, upVec);
-    float viewZ = v3_dot(rel, forward);
-
-    const float NEAR_PLANE = 0.05f;
-    if (viewZ <= NEAR_PLANE) return 0;
-
-    float f = 1.0f / tanf(fov * 0.5f);
-    float nx = (viewX * f / aspect) / viewZ;
-    float ny = (viewY * f) / viewZ;
-
-    out->x = (nx * 0.5f + 0.5f) * WINW;
-    out->y = (1.0f - (ny * 0.5f + 0.5f)) * WINH;
-    if (depth) *depth = viewZ;
-    return 1;
-}
-
-static void drawQuad(SDL_Renderer *renderer, WallFace *face, Vec3 forward, Vec3 right, Vec3 upVec) {
-    SDL_FPoint proj[4];
-    float depth[4];
-    float aspect = (float)WINW / (float)WINH;
-    for (int i = 0; i < 4; i++) {
-        if (!projectPoint(face->verts[i], &proj[i], &depth[i], forward, right, upVec, aspect)) {
-            return;
-        }
-    }
-
-    float avgDepth = (depth[0] + depth[1] + depth[2] + depth[3]) * 0.25f;
-    float shade = 1.2f / (0.6f + avgDepth);
-    if (shade > 1.0f) shade = 1.0f;
-    if (shade < 0.25f) shade = 0.25f;
-
-    SDL_Color c = face->color;
-    SDL_Color shaded = {
-        (Uint8)(c.r * shade),
-        (Uint8)(c.g * shade),
-        (Uint8)(c.b * shade),
-        c.a
-    };
-
-    SDL_Vertex verts[6];
-    SDL_Color colors[2] = {shaded, shaded};
-    (void)colors; // silence unused in older SDL versions
-    verts[0].position = proj[0];
-    verts[1].position = proj[1];
-    verts[2].position = proj[2];
-    verts[3].position = proj[0];
-    verts[4].position = proj[2];
-    verts[5].position = proj[3];
-    for (int i = 0; i < 6; i++) {
-        verts[i].color = shaded;
-        verts[i].tex_coord.x = verts[i].tex_coord.y = 0.0f;
-    }
-
-    SDL_RenderGeometry(renderer, NULL, verts, 6, NULL, 0);
-}
-
-static void drawFloor(SDL_Renderer *renderer, Vec3 forward, Vec3 right, Vec3 upVec) {
-    SDL_FPoint proj[4];
-    float aspect = (float)WINW / (float)WINH;
-    float depth;
-    Vec3 verts[4] = {
-        v3(0, 0, 0),
-        v3(MAP_W * TILE_SIZE, 0, 0),
-        v3(MAP_W * TILE_SIZE, 0, MAP_H * TILE_SIZE),
-        v3(0, 0, MAP_H * TILE_SIZE)
-    };
-
-    for (int i = 0; i < 4; i++) {
-        if (!projectPoint(verts[i], &proj[i], &depth, forward, right, upVec, aspect)) return;
-    }
-
-    SDL_Color floorColor = {70, 90, 110, 255};
-    SDL_Color ceilingColor = {40, 45, 65, 255};
-
-    SDL_Vertex floorVerts[6];
-    floorVerts[0].position = proj[0];
-    floorVerts[1].position = proj[1];
-    floorVerts[2].position = proj[2];
-    floorVerts[3].position = proj[0];
-    floorVerts[4].position = proj[2];
-    floorVerts[5].position = proj[3];
-    for (int i = 0; i < 6; i++) {
-        floorVerts[i].color = floorColor;
-        floorVerts[i].tex_coord.x = floorVerts[i].tex_coord.y = 0.0f;
-    }
-    SDL_RenderGeometry(renderer, NULL, floorVerts, 6, NULL, 0);
-
-    // Ceiling just mirrored at WALL_HEIGHT
-    Vec3 cVerts[4] = {
-        v3(0, WALL_HEIGHT, 0),
-        v3(MAP_W * TILE_SIZE, WALL_HEIGHT, 0),
-        v3(MAP_W * TILE_SIZE, WALL_HEIGHT, MAP_H * TILE_SIZE),
-        v3(0, WALL_HEIGHT, MAP_H * TILE_SIZE)
-    };
-    for (int i = 0; i < 4; i++) {
-        if (!projectPoint(cVerts[i], &proj[i], &depth, forward, right, upVec, aspect)) return;
-    }
-    SDL_Vertex ceilVerts[6];
-    ceilVerts[0].position = proj[0];
-    ceilVerts[1].position = proj[1];
-    ceilVerts[2].position = proj[2];
-    ceilVerts[3].position = proj[0];
-    ceilVerts[4].position = proj[2];
-    ceilVerts[5].position = proj[3];
-    for (int i = 0; i < 6; i++) {
-        ceilVerts[i].color = ceilingColor;
-        ceilVerts[i].tex_coord.x = ceilVerts[i].tex_coord.y = 0.0f;
-    }
-    SDL_RenderGeometry(renderer, NULL, ceilVerts, 6, NULL, 0);
 }
 
 void wolf3dInit() {
     buildLevel();
-    // Start inside an open hallway instead of intersecting a wall tile.
     camPos = v3(1.5f, 0.4f, 1.5f);
     camYaw = 0.0f;
     camPitch = 0.0f;
@@ -236,8 +127,8 @@ void wolf3dTick(double dt) {
     if (Held(INP_A)) camYaw -= rotSpeed;
     if (Held(INP_D)) camYaw += rotSpeed;
 
-    if (camYaw < -M_PI) camYaw += 2.0f * (float)M_PI;
-    if (camYaw > M_PI) camYaw -= 2.0f * (float)M_PI;
+    if (camYaw < -(float)M_PI) camYaw += 2.0f * (float)M_PI;
+    if (camYaw > (float)M_PI) camYaw -= 2.0f * (float)M_PI;
 
     Vec3 forward = v3(cosf(camYaw), 0.0f, sinf(camYaw));
     Vec3 right = v3(-sinf(camYaw), 0.0f, cosf(camYaw));
@@ -260,25 +151,27 @@ void wolf3dTick(double dt) {
     }
 }
 
+static int compareDepth(const void *a, const void *b) {
+    float da = ((const MeshInstance *)a)->depth;
+    float db = ((const MeshInstance *)b)->depth;
+    if (da < db) return 1;
+    if (da > db) return -1;
+    return 0;
+}
+
 void wolf3dRender(SDL_Renderer *renderer) {
     Vec3 forward = v3(cosf(camYaw) * cosf(camPitch), sinf(camPitch), sinf(camYaw) * cosf(camPitch));
-    Vec3 right = v3(cosf(camYaw + (float)M_PI * 0.5f), 0.0f, sinf(camYaw + (float)M_PI * 0.5f));
-    Vec3 upVec = v3_cross(right, forward);
 
-    FaceDepth order[MAP_W * MAP_H * 6];
-    for (int i = 0; i < faceCount; i++) {
-        Vec3 c = v3_scale(v3_add(v3_add(faces[i].verts[0], faces[i].verts[1]), v3_add(faces[i].verts[2], faces[i].verts[3])),
-                          0.25f);
-        float depth = v3_dot(v3_sub(c, camPos), forward);
-        order[i].index = i;
-        order[i].depth = depth;
+    render3dSetCamera(camPos, camYaw, camPitch, fov);
+
+    // Compute center depths for sorting (Painter's algorithm)
+    for (int i = 0; i < instanceCount; i++) {
+        instances[i].depth = v3_dot(v3_sub(instances[i].position, camPos), forward);
     }
+    qsort(instances, instanceCount, sizeof(MeshInstance), compareDepth);
 
-    qsort(order, faceCount, sizeof(FaceDepth), compareFaceDepth);
-
-    drawFloor(renderer, forward, right, upVec);
-    for (int i = 0; i < faceCount; i++) {
-        drawQuad(renderer, &faces[order[i].index], forward, right, upVec);
+    for (int i = 0; i < instanceCount; i++) {
+        drawMesh(renderer, instances[i].mesh, instances[i].position, instances[i].rotation, instances[i].scale, instances[i].tint);
     }
 
     SDL_Color white = {255, 255, 255, 255};
