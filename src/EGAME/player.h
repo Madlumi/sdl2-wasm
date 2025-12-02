@@ -10,6 +10,7 @@ typedef struct {
     float facingX;
     float facingY;
     int exp;
+    int wood;
 } Player;
 
 const Player *playerGet(void);
@@ -17,5 +18,7 @@ void playerInit(void);
 void playerTick(double dt);
 void playerRender(SDL_Renderer *r);
 void playerAddExp(int amount);
+void playerAddWood(int amount);
+int playerGetWood(void);
 
 #endif

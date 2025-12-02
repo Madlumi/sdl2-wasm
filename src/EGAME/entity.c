@@ -1,5 +1,6 @@
 #include "entity.h"
 #include "world.h"
+#include "trees.h"
 #include "../MENGINE/renderer.h"
 #include <math.h>
 
@@ -61,6 +62,7 @@ int entityCollidesAt(const Entity *e, float cx, float cy) {
             if (worldTileSolid(tx, ty)) return 1;
         }
     }
+    if (treesCollidesAt(left, right, top, bottom)) return 1;
     return 0;
 }
 

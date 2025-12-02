@@ -1,5 +1,6 @@
 #include "player.h"
 #include "enemy.h"
+#include "trees.h"
 #include "world.h"
 #include "../MENGINE/keys.h"
 #include "../MENGINE/renderer.h"
@@ -83,7 +84,11 @@ static void findSpawn(void) {
             if (!worldTileSolid(x, y)) {
                 player.body.x = x * worldTileWidth() + worldTileWidth() * 0.5f;
                 player.body.y = y * worldTileHeight() + worldTileHeight() * 0.5f;
-                return;
+                float left = player.body.x - player.body.halfW;
+                float right = player.body.x + player.body.halfW;
+                float top = player.body.y - player.body.halfH;
+                float bottom = player.body.y + player.body.halfH;
+                if (!treesCollidesAt(left, right, top, bottom)) return;
             }
         }
     }
@@ -97,6 +102,7 @@ void playerInit(void) {
     player.facingX = 0.0f;
     player.facingY = 1.0f;
     player.exp = 0;
+    player.wood = 0;
     slash.active = 0;
     expPopup.active = 0;
     findSpawn();
@@ -108,6 +114,7 @@ void playerTick(double dt) {
     if (slash.active) {
         slash.timer += (float)dt;
         enemyApplySlash(&slash.area, 6, slash.id);
+        treesApplySlash(&slash.area, 6, slash.id);
         if (slash.timer >= slash.lifetime) slash.active = 0;
     }
 
@@ -129,6 +136,7 @@ void playerTick(double dt) {
         slash.active = 1;
         slash.id = ++slashIdCounter;
         enemyApplySlash(&slash.area, 6, slash.id);
+        treesApplySlash(&slash.area, 6, slash.id);
     }
 
     if (expPopup.active) {
@@ -172,3 +180,10 @@ void playerAddExp(int amount) {
     player.exp += amount;
     startExpPopup();
 }
+
+void playerAddWood(int amount) {
+    if (amount <= 0) return;
+    player.wood += amount;
+}
+
+int playerGetWood(void) { return player.wood; }
