@@ -22,8 +22,6 @@ typedef struct {
 static Tree trees[32];
 static int treeCount = 0;
 
-static const int treePositions[][2] = {{6, 6}, {10, 14}, {20, 8}, {14, 18}, {23, 16}};
-
 static int entityOverlap(const Entity *a, const Entity *b) {
     float leftA = a->x - a->halfW;
     float rightA = a->x + a->halfW;
@@ -61,19 +59,32 @@ static void initTree(Tree *t, float x, float y) {
     t->woodYield = 4;
 }
 
+static int treeOverlapsExisting(const Tree *candidate) {
+    for (int i = 0; i < treeCount; i++) {
+        if (entityOverlap(&trees[i].body, &candidate->body)) return 1;
+    }
+    return 0;
+}
+
 void treesInit(void) {
     treeCount = 0;
-    int options = (int)(sizeof(treePositions) / sizeof(treePositions[0]));
-    for (int i = 0; i < options && treeCount < (int)(sizeof(trees) / sizeof(trees[0])); i++) {
-        int tx = treePositions[i][0];
-        int ty = treePositions[i][1];
-        if (worldTileSolid(tx, ty)) continue;
+    int limit = (int)(sizeof(trees) / sizeof(trees[0]));
+    for (int ty = 0; ty < worldMapHeight() && treeCount < limit; ty++) {
+        for (int tx = 0; tx < worldMapWidth() && treeCount < limit; tx++) {
+            if (!worldTileIsSand(tx, ty)) continue;
+            if ((tx + ty) % 3 != 0) continue; // spread trees out a bit
+            if (worldTileSolid(tx, ty)) continue;
 
-        float px = tx * worldTileWidth() + worldTileWidth() * 0.5f;
-        float py = ty * worldTileHeight() + worldTileHeight() * 0.5f;
+            float px = tx * worldTileWidth() + worldTileWidth() * 0.5f;
+            float py = ty * worldTileHeight() + worldTileHeight() * 0.5f;
 
-        initTree(&trees[treeCount], px, py);
-        treeCount++;
+            Tree candidate;
+            initTree(&candidate, px, py);
+            if (treeOverlapsExisting(&candidate)) continue;
+
+            trees[treeCount] = candidate;
+            treeCount++;
+        }
     }
 }
 
@@ -125,14 +136,14 @@ void treesRender(SDL_Renderer *r) {
         float alphaScale = t->falling ? (1.0f - fallProgress) : 1.0f;
         Uint8 alpha = (Uint8)(255 * alphaScale);
 
-        int px = (int)(t->body.x - t->body.halfW + offsetX);
-        int py = (int)(t->body.y - t->body.halfH + drop);
-        int pw = (int)(t->body.halfW * 2);
-        int ph = (int)(t->body.halfH * 2);
+        float px = t->body.x - t->body.halfW + offsetX;
+        float py = t->body.y - t->body.halfH + drop;
+        float pw = t->body.halfW * 2;
+        float ph = t->body.halfH * 2;
+        SDL_Rect dst = worldRect(px, py, pw, ph);
 
         if (palm) {
             SDL_SetTextureAlphaMod(palm, alpha);
-            SDL_Rect dst = {px, py, pw, ph};
             SDL_RenderCopy(renderer, palm, NULL, &dst);
             SDL_SetTextureAlphaMod(palm, 255);
         } else {
@@ -140,8 +151,9 @@ void treesRender(SDL_Renderer *r) {
             SDL_Color leafShade = leaves;
             trunkShade.a = alpha;
             leafShade.a = alpha;
-            drawRect(px + pw / 3, py + ph / 3, pw / 3, ph * 2 / 3, ANCHOR_NONE, trunkShade);
-            drawRect(px, py, pw, ph / 2, ANCHOR_NONE, leafShade);
+            drawWorldRect(px + pw / 3.0f, py + ph / 3.0f, pw / 3.0f, ph * 2.0f / 3.0f,
+                          trunkShade);
+            drawWorldRect(px, py, pw, ph / 2.0f, leafShade);
         }
 
         if (!t->falling && !healthIsDepleted(&t->health)) {

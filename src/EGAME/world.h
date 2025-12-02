@@ -10,6 +10,7 @@ float worldPixelWidth(void);
 float worldPixelHeight(void);
 
 int worldTileSolid(int tx, int ty);
+int worldTileIsSand(int tx, int ty);
 
 void worldInit(void);
 void worldTick(double dt);

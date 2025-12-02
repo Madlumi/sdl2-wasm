@@ -130,11 +130,11 @@ void enemyRender(SDL_Renderer *r) {
     SDL_Color c = {220, 80, 80, 255};
     for (int i = 0; i < enemyCount; i++) {
         Enemy *e = &enemies[i];
-        int px = (int)(e->body.x - e->body.halfW);
-        int py = (int)(e->body.y - e->body.halfH);
-        int pw = (int)(e->body.halfW * 2);
-        int ph = (int)(e->body.halfH * 2);
-        drawRect(px, py, pw, ph, ANCHOR_NONE, c);
+        float px = e->body.x - e->body.halfW;
+        float py = e->body.y - e->body.halfH;
+        float pw = e->body.halfW * 2;
+        float ph = e->body.halfH * 2;
+        drawWorldRect(px, py, pw, ph, c);
         healthbarRender(&e->body, &e->health, &e->bar);
     }
 }

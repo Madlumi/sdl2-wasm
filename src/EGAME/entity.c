@@ -36,9 +36,8 @@ void healthbarRender(const Entity *anchor, const Health *health, const HealthBar
     SDL_Color bg = bar->backColor;
     SDL_Color fg = bar->fillColor;
 
-    drawRect(left, top, totalW, totalH, ANCHOR_NONE, bg);
-    drawRect(left + 1, top + 1, (int)((totalW - 2) * ratio), totalH - 2, ANCHOR_NONE,
-             fg);
+    drawWorldRect(left, top, totalW, totalH, bg);
+    drawWorldRect(left + 1, top + 1, (int)((totalW - 2) * ratio), totalH - 2, fg);
 }
 
 static int tileSpan(float start, float end, int size, int *outMin, int *outMax) {

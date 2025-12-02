@@ -330,10 +330,30 @@ void drawTexture(const C* name, I x, I y, ANCHOR anchor, const C* palName) {
 
 void drawRect(I x, I y, I w, I h, ANCHOR anchor, SDL_Color c) {
     calculateAnchorPosition(&x, &y, w, h, anchor);
-    
+
     SDL_Rect rect = {x, y, w, h};
     SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a);
     SDL_RenderFillRect(renderer, &rect);
+}
+
+SDL_Rect worldRect(F left, F top, F w, F h) {
+    F fx = (left - XOFF) * ZOOM;
+    F fy = (top - YOFF) * ZOOM;
+    F fx2 = ((left + w) - XOFF) * ZOOM;
+    F fy2 = ((top + h) - YOFF) * ZOOM;
+
+    SDL_Rect r;
+    r.x = (I)floorf(fx);
+    r.y = (I)floorf(fy);
+    r.w = (I)ceilf(fx2) - r.x;
+    r.h = (I)ceilf(fy2) - r.y;
+    return r;
+}
+
+void drawWorldRect(F left, F top, F w, F h, SDL_Color c) {
+    SDL_Rect r = worldRect(left, top, w, h);
+    SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a);
+    SDL_RenderFillRect(renderer, &r);
 }
 
 void drawLine(I x1, I y1, I x2, I y2, SDL_Color c) {

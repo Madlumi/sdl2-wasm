@@ -48,6 +48,11 @@ int worldTileSolid(int tx, int ty) {
     return TILE_INFO[world[indexFor(tx, ty)]].solid;
 }
 
+int worldTileIsSand(int tx, int ty) {
+    if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return 0;
+    return world[indexFor(tx, ty)] == TILE_SAND;
+}
+
 static SDL_Rect tileScreenRect(int tx, int ty) {
     float fx = ((float)tx * tileW - XOFF) * ZOOM;
     float fy = ((float)ty * tileH - YOFF) * ZOOM;

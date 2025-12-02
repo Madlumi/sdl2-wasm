@@ -149,19 +149,19 @@ void playerTick(double dt) {
 void playerRender(SDL_Renderer *r) {
     (void)r;
     SDL_Color c = {255, 240, 120, 255};
-    int px = (int)(player.body.x - player.body.halfW);
-    int py = (int)(player.body.y - player.body.halfH);
-    int pw = (int)(player.body.halfW * 2);
-    int ph = (int)(player.body.halfH * 2);
-    drawRect(px, py, pw, ph, ANCHOR_NONE, c);
+    float px = player.body.x - player.body.halfW;
+    float py = player.body.y - player.body.halfH;
+    float pw = player.body.halfW * 2;
+    float ph = player.body.halfH * 2;
+    drawWorldRect(px, py, pw, ph, c);
 
     if (slash.active) {
         SDL_Color slashColor = {220, 220, 255, 180};
-        int sx = (int)(slash.area.x - slash.area.halfW);
-        int sy = (int)(slash.area.y - slash.area.halfH);
-        int sw = (int)(slash.area.halfW * 2);
-        int sh = (int)(slash.area.halfH * 2);
-        drawRect(sx, sy, sw, sh, ANCHOR_NONE, slashColor);
+        float sx = slash.area.x - slash.area.halfW;
+        float sy = slash.area.y - slash.area.halfH;
+        float sw = slash.area.halfW * 2;
+        float sh = slash.area.halfH * 2;
+        drawWorldRect(sx, sy, sw, sh, slashColor);
     }
 
     if (expPopup.active) {
@@ -169,8 +169,8 @@ void playerRender(SDL_Renderer *r) {
         if (alphaRatio < 0.0f) alphaRatio = 0.0f;
         SDL_Color textColor = {255, 255, 255, (Uint8)(255 * alphaRatio)};
         float rise = expPopup.baseOffset + expPopup.riseSpeed * expPopup.timer;
-        int tx = (int)player.body.x;
-        int ty = (int)(player.body.y - player.body.halfH - rise);
+        int tx, ty;
+        worldToScreen(player.body.x, player.body.y - player.body.halfH - rise, &tx, &ty);
         drawText("default_font", tx, ty, ANCHOR_NONE, textColor, "+1 exp");
     }
 }
