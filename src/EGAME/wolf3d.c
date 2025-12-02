@@ -1,3 +1,4 @@
+
 #include "wolf3d.h"
 #include "../MENGINE/keys.h"
 #include "../MENGINE/renderer.h"
@@ -39,14 +40,14 @@ static const float CAM_EYE_HEIGHT = 0.4f;
 static const float GRAVITY        = -9.0f;
 static const float JUMP_IMPULSE   = 3.0f;
 
-// per-tile floor level in world space
-static float currentFloorHeight = 0.0f;
+static float currentFloorHeight = 0.0f;  // kept but not really used now
 
 static int   isGrounded = 1;     // start on ground
 
 static const float MAX_FALL_SPEED = -30.0f;  // clamp
 
-static const float MAX_STEP_HEIGHT = 1.0f * WALL_HEIGHT + 0.01f; // walk up 1 tile
+// left here for reference, not used in the new slope logic
+static const float MAX_STEP_HEIGHT = 1.0f * WALL_HEIGHT + 0.01f;
 
 // heightmap storage
 static int LEVEL[MAP_H][MAP_W];
@@ -56,6 +57,9 @@ static fnl_state gNoise;
 static inline int iabs(int v) { return v < 0 ? -v : v; }
 
 
+// -------------------------------------------------------------
+// Level generation
+// -------------------------------------------------------------
 
 static void generateLevel(void) {
     int cx  = MAP_W / 2;      // center hill
@@ -84,9 +88,9 @@ static void generateLevel(void) {
                 int dz = iabs(z - cz);
                 int d  = dx > dz ? dx : dz;
 
-                if      (d <= 2)        h = 3;     // top
-                else if (d <= 4 && h < 2) h = 2;
-                else if (d <= 6 && h < 1) h = 1;
+                if      (d <= 2)           h = 3;     // top
+                else if (d <= 4 && h < 2)  h = 2;
+                else if (d <= 6 && h < 1)  h = 1;
             }
 
             // ----------------------------------------------------
@@ -102,8 +106,7 @@ static void generateLevel(void) {
             }
 
             // ----------------------------------------------------
-            // Pit: blocked by your movement rule (newH >= 0)
-            // we keep this exact, no noise, so it's a clean test area
+            // Pit: test area, can be fallen into
             // ----------------------------------------------------
             if (x >= 25 && x <= 28 && z >= 10 && z <= 13) {
                 LEVEL[z][x] = -1;
@@ -128,19 +131,10 @@ static void generateLevel(void) {
 
             // ----------------------------------------------------
             // Perlin noise modulation
-            //
-            // - fnlGetNoise2D returns roughly [-1, 1]
-            // - scale coords to control “wavelength”
-            // - convert to small integer bump (-1, 0, +1)
             // ----------------------------------------------------
             {
-                float nx = (float)x * 0.15f;   // spatial scale, tweak
-                float nz = (float)z * 0.15f;
-
-                float n = fnlGetNoise2D(&gNoise, nx, nz);   // [-1,1]
-                // small bump in [-1,1], mostly -1/0/1 after rounding
-                int bump = (int)roundf(n * 10.0f);
-
+                float n = fnlGetNoise2D(&gNoise, (float)x, (float)z); // [-1,1]
+                int bump = (int)roundf(n * 2.0f); // mostly -2..+2
                 h += bump;
             }
 
@@ -154,24 +148,13 @@ static void generateLevel(void) {
 }
 
 
-
-
-
-// -------------------------------------------------------------
-// Types (use your real ones)
-// -------------------------------------------------------------
-
-
-
-
-
 // -------------------------------------------------------------
 // Tile helpers
 // -------------------------------------------------------------
 
 static int tileHeight(int x, int z) {
     if (x < 0 || z < 0 || x >= MAP_W || z >= MAP_H)
-        return 9;  // big solid border
+        return 9;  // big solid outside
     return LEVEL[z][x];
 }
 
@@ -179,80 +162,142 @@ static int isWall(int x, int z) {
     return tileHeight(x, z) > 0;
 }
 
+// sample continuous terrain height at world-space position (x,z)
+static float sampleHeightAt(float wx, float wz) {
+    float gx = wx / TILE_SIZE;
+    float gz = wz / TILE_SIZE;
+
+    int x0 = (int)floorf(gx);
+    int z0 = (int)floorf(gz);
+
+    // clamp to valid cell range [0 .. MAP_W-2] / [0 .. MAP_H-2]
+    if (x0 < 0) x0 = 0;
+    if (z0 < 0) z0 = 0;
+    if (x0 > MAP_W - 2) x0 = MAP_W - 2;
+    if (z0 > MAP_H - 2) z0 = MAP_H - 2;
+
+    int x1 = x0 + 1;
+    int z1 = z0 + 1;
+
+    float tx = gx - (float)x0;
+    float tz = gz - (float)z0;
+
+    int h00 = tileHeight(x0, z0);
+    int h10 = tileHeight(x1, z0);
+    int h01 = tileHeight(x0, z1);
+    int h11 = tileHeight(x1, z1);
+
+    float y00 = h00 * WALL_HEIGHT;
+    float y10 = h10 * WALL_HEIGHT;
+    float y01 = h01 * WALL_HEIGHT;
+    float y11 = h11 * WALL_HEIGHT;
+
+    // bilinear interpolation
+    float y0 = y00 + (y10 - y00) * tx;
+    float y1 = y01 + (y11 - y01) * tx;
+    return y0 + (y1 - y0) * tz;
+}
+
+
 // -------------------------------------------------------------
-// Level build
+// Level build: sloped terrain + walls where diff >= 4
 // -------------------------------------------------------------
 
 static void buildLevel(void) {
     faceCount = 0;
 
+    SDL_Color terrainColor = (SDL_Color){180, 180, 200, 255};
+    SDL_Color wallColorPos = (SDL_Color){220, 220, 240, 255};
+    SDL_Color wallColorNeg = (SDL_Color){140, 140, 170, 255};
+
+    // 1) heightfield terrain as quads with per-corner heights
+    for (int z = 0; z < MAP_H - 1; z++) {
+        for (int x = 0; x < MAP_W - 1; x++) {
+            if (faceCount >= (int)(sizeof(faces)/sizeof(faces[0]))) break;
+
+            int h00 = tileHeight(x,     z);
+            int h10 = tileHeight(x + 1, z);
+            int h01 = tileHeight(x,     z + 1);
+            int h11 = tileHeight(x + 1, z + 1);
+
+            float y00 = h00 * WALL_HEIGHT;
+            float y10 = h10 * WALL_HEIGHT;
+            float y01 = h01 * WALL_HEIGHT;
+            float y11 = h11 * WALL_HEIGHT;
+
+            float fx = x * TILE_SIZE;
+            float fz = z * TILE_SIZE;
+
+            render3dInitQuadMesh(&faces[faceCount++],
+                v3(fx,            y00, fz),
+                v3(fx+TILE_SIZE,  y10, fz),
+                v3(fx+TILE_SIZE,  y11, fz+TILE_SIZE),
+                v3(fx,            y01, fz+TILE_SIZE),
+                terrainColor);
+        }
+    }
+
+    // 2) vertical walls where height diff >= 4 between neighbors
+    const int WALL_DIFF_THRESHOLD = 4;
+
+    // horizontal edges between (x,z) and (x+1,z)
     for (int z = 0; z < MAP_H; z++) {
+        for (int x = 0; x < MAP_W - 1; x++) {
+            if (faceCount >= (int)(sizeof(faces)/sizeof(faces[0]))) break;
+
+            int hA = tileHeight(x,     z);
+            int hB = tileHeight(x + 1, z);
+            int diff = hB - hA;
+            if (iabs(diff) < WALL_DIFF_THRESHOLD) continue;
+
+            float fx = (x + 1) * TILE_SIZE;   // edge at x+1
+            float fz = z * TILE_SIZE;
+
+            float yLow  = (diff > 0 ? hA : hB) * WALL_HEIGHT;
+            float yHigh = (diff > 0 ? hB : hA) * WALL_HEIGHT;
+
+            SDL_Color col = diff > 0 ? wallColorPos : wallColorNeg;
+
+            // vertical wall quad along z
+            render3dInitQuadMesh(&faces[faceCount++],
+                v3(fx, yLow,  fz),
+                v3(fx, yLow,  fz+TILE_SIZE),
+                v3(fx, yHigh, fz+TILE_SIZE),
+                v3(fx, yHigh, fz),
+                col);
+        }
+    }
+
+    // vertical edges between (x,z) and (x,z+1)
+    for (int z = 0; z < MAP_H - 1; z++) {
         for (int x = 0; x < MAP_W; x++) {
-            int h = tileHeight(x, z);
-            if (h <= 0) continue;
+            if (faceCount >= (int)(sizeof(faces)/sizeof(faces[0]))) break;
 
-            float fx  = x * TILE_SIZE;
-            float fz  = z * TILE_SIZE;
-            float top = h * WALL_HEIGHT;
+            int hA = tileHeight(x, z);
+            int hB = tileHeight(x, z + 1);
+            int diff = hB - hA;
+            if (iabs(diff) < WALL_DIFF_THRESHOLD) continue;
 
-            SDL_Color base   = (SDL_Color){180, 180, 200, 255};
-            SDL_Color shadow = (SDL_Color){140, 140, 170, 255};
-            SDL_Color light  = (SDL_Color){220, 220, 240, 255};
+            float fx = x * TILE_SIZE;
+            float fz = (z + 1) * TILE_SIZE;  // edge at z+1
 
-            // north face
-            if (tileHeight(x, z - 1) < h && faceCount < (int)(sizeof(faces)/sizeof(faces[0]))) {
-                render3dInitQuadMesh(&faces[faceCount++],
-                    v3(fx,           0,   fz),
-                    v3(fx+TILE_SIZE, 0,   fz),
-                    v3(fx+TILE_SIZE, top, fz),
-                    v3(fx,           top, fz),
-                    base);
-            }
+            float yLow  = (diff > 0 ? hA : hB) * WALL_HEIGHT;
+            float yHigh = (diff > 0 ? hB : hA) * WALL_HEIGHT;
 
-            // east face
-            if (tileHeight(x + 1, z) < h && faceCount < (int)(sizeof(faces)/sizeof(faces[0]))) {
-                render3dInitQuadMesh(&faces[faceCount++],
-                    v3(fx+TILE_SIZE, 0,   fz),
-                    v3(fx+TILE_SIZE, 0,   fz+TILE_SIZE),
-                    v3(fx+TILE_SIZE, top, fz+TILE_SIZE),
-                    v3(fx+TILE_SIZE, top, fz),
-                    light);
-            }
+            SDL_Color col = diff > 0 ? wallColorPos : wallColorNeg;
 
-            // south face
-            if (tileHeight(x, z + 1) < h && faceCount < (int)(sizeof(faces)/sizeof(faces[0]))) {
-                render3dInitQuadMesh(&faces[faceCount++],
-                    v3(fx+TILE_SIZE, 0,   fz+TILE_SIZE),
-                    v3(fx,           0,   fz+TILE_SIZE),
-                    v3(fx,           top, fz+TILE_SIZE),
-                    v3(fx+TILE_SIZE, top, fz+TILE_SIZE),
-                    base);
-            }
-
-            // west face
-            if (tileHeight(x - 1, z) < h && faceCount < (int)(sizeof(faces)/sizeof(faces[0]))) {
-                render3dInitQuadMesh(&faces[faceCount++],
-                    v3(fx, 0,   fz+TILE_SIZE),
-                    v3(fx, 0,   fz),
-                    v3(fx, top, fz),
-                    v3(fx, top, fz+TILE_SIZE),
-                    shadow);
-            }
-
-            // top face of this column
-            if (faceCount < (int)(sizeof(faces)/sizeof(faces[0]))) {
-                render3dInitQuadMesh(&faces[faceCount++],
-                    v3(fx,           top, fz),
-                    v3(fx+TILE_SIZE, top, fz),
-                    v3(fx+TILE_SIZE, top, fz+TILE_SIZE),
-                    v3(fx,           top, fz+TILE_SIZE),
-                    light);
-            }
+            // vertical wall quad along x
+            render3dInitQuadMesh(&faces[faceCount++],
+                v3(fx,           yLow,  fz),
+                v3(fx+TILE_SIZE, yLow,  fz),
+                v3(fx+TILE_SIZE, yHigh, fz),
+                v3(fx,           yHigh, fz),
+                col);
         }
     }
 }
 
-// flat floor at y=0 for now
+// flat floor at y=0 for now (optional, mostly hidden by terrain)
 static void buildFloor(void) {
     floorCount = 0;
 
@@ -280,30 +325,31 @@ static void buildFloor(void) {
     }
 }
 
+
 // -------------------------------------------------------------
 // Init / tick / render
 // -------------------------------------------------------------
 
 void wolf3dInit(void) {
-
-
-   
     // init noise
     gNoise = fnlCreateState();
     gNoise.noise_type = FNL_NOISE_PERLIN;
-    gNoise.frequency = 0.5f;     // tweak scale: smaller => smoother, larger => more bumpy
-    gNoise.seed = 1337;           // or whatever, make configurable if you like
-    generateLevel();     
+    gNoise.frequency = 0.5f;     // higher => more bumps
+    gNoise.seed = 1337;
 
+    generateLevel();
     buildLevel();
     buildFloor();
 
     currentFloorHeight = 0.0f;
 
-    camPos = v3(1.5f, currentFloorHeight + CAM_EYE_HEIGHT, 1.5f);
+    // start somewhere near (1.5,1.5)
+    float groundY = sampleHeightAt(1.5f, 1.5f);
+    camPos = v3(1.5f, groundY + CAM_EYE_HEIGHT, 1.5f);
     camYaw = 0.0f;
     camPitch = 0.0f;
     camVelY = 0.0f;
+    isGrounded = 1;
 }
 
 
@@ -336,17 +382,14 @@ void wolf3dTick(double dt) {
 
     // ============================================================
     // 1) VERTICAL PHYSICS (jumping, falling, landing)
-    //    This runs BEFORE horizontal move so jump affects movement
+    //    Uses continuous sampled terrain height
     // ============================================================
 
-    int tileX = (int)(camPos.x / TILE_SIZE);
-    int tileZ = (int)(camPos.z / TILE_SIZE);
-    int hCur  = tileHeight(tileX, tileZ);
-    float floorY = hCur * WALL_HEIGHT;              // can be negative (pit)
-    float feetY  = camPos.y - CAM_EYE_HEIGHT;
+    float groundY = sampleHeightAt(camPos.x, camPos.z);
+    float feetY   = camPos.y - CAM_EYE_HEIGHT;
 
     // walked off a ledge? -> not grounded anymore
-    if (feetY > floorY + 0.01f) {
+    if (feetY > groundY + 0.01f) {
         isGrounded = 0;
     }
 
@@ -363,34 +406,29 @@ void wolf3dTick(double dt) {
     // integrate vertical
     camPos.y += camVelY * (float)dt;
 
-    // recompute floor and feet after vertical move
-    tileX = (int)(camPos.x / TILE_SIZE);
-    tileZ = (int)(camPos.z / TILE_SIZE);
-    hCur  = tileHeight(tileX, tileZ);
-    floorY = hCur * WALL_HEIGHT;
-    feetY  = camPos.y - CAM_EYE_HEIGHT;
+    // recompute ground+feet after vertical move
+    groundY = sampleHeightAt(camPos.x, camPos.z);
+    feetY   = camPos.y - CAM_EYE_HEIGHT;
 
-    // landing: only when moving downward and feet go below floor
-    if (camVelY <= 0.0f && feetY <= floorY) {
-        camPos.y  = floorY + CAM_EYE_HEIGHT;
+    // landing: only when moving downward and feet go below ground
+    if (camVelY <= 0.0f && feetY <= groundY) {
+        camPos.y  = groundY + CAM_EYE_HEIGHT;
         camVelY   = 0.0f;
         isGrounded = 1;
-        feetY = floorY;
+        feetY = groundY;
     }
 
     // ============================================================
-    // 2) HORIZONTAL MOVE WITH STEP LOGIC
-    //    - If grounded: can step up <= 1 tile height difference
-    //    - If airborne: ignore floor height, only block solid walls
+    // 2) HORIZONTAL MOVE WITH WALL LOGIC
+    //    - If grounded: cannot cross edges where |Δheight| >= 4
+    //    - If airborne: can cross walls (if jump arc reaches)
     // ============================================================
 
-    // current tile (AFTER vertical update)
+    // tile indices (using integer tile heights for wall detection)
     int curTx = (int)(camPos.x / TILE_SIZE);
     int curTz = (int)(camPos.z / TILE_SIZE);
     int curH  = tileHeight(curTx, curTz);
-    float curFloorY = curH * WALL_HEIGHT;
 
-    // candidate new position
     Vec3 newPos = camPos;
     newPos.x += move.x;
     newPos.z += move.z;
@@ -398,31 +436,30 @@ void wolf3dTick(double dt) {
     int newTx = (int)(newPos.x / TILE_SIZE);
     int newTz = (int)(newPos.z / TILE_SIZE);
     int newH  = tileHeight(newTx, newTz);
-    float newFloorY = newH * WALL_HEIGHT;
 
-    // solid tiles (e.g., border walls) block always
-        if (isGrounded) {
-            // grounded: allow stepping up to 1 tile
-            if (newFloorY <= curFloorY + MAX_STEP_HEIGHT) {
-                camPos.x = newPos.x;
-                camPos.z = newPos.z;
-                // going down a ledge: feet are above new floor, so next frame we start falling
-                // going up <=1 step: vertical will snap you onto new floor in a frame or two
-            } else {
-                // too high (>= 2 tiles): need jump, cannot just walk in
-            }
-        } else {
-            // airborne: free horizontal movement over gaps / towards higher ledges
+    const int WALL_DIFF_THRESHOLD = 4;
+
+    if (isGrounded) {
+        // grounded: treat |Δheight| >= 4 as a wall edge
+        if (iabs(newH - curH) < WALL_DIFF_THRESHOLD) {
             camPos.x = newPos.x;
             camPos.z = newPos.z;
+        } else {
+            // hit a wall while grounded -> blocked
         }
+    } else {
+        // airborne: free horizontal movement, can jump over walls
+        camPos.x = newPos.x;
+        camPos.z = newPos.z;
+    }
 }
+
 
 void wolf3dRender(SDL_Renderer *renderer) {
     Camera3D cam = {camPos, camYaw, camPitch, fov};
     render3dSetCamera(cam);
 
-    // floor
+    // floor (optional, mostly hidden by terrain)
     for (int i = 0; i < floorCount; i++) {
         drawMesh(renderer,
             &floorFaces[i].mesh,
@@ -431,7 +468,7 @@ void wolf3dRender(SDL_Renderer *renderer) {
             floorFaces[i].color);
     }
 
-    // sort walls back-to-front
+    // sort terrain + walls back-to-front
     FaceDepth order[MAP_W * MAP_H * 6];
     for (int i = 0; i < faceCount; i++) {
         order[i].index = i;
@@ -442,7 +479,7 @@ void wolf3dRender(SDL_Renderer *renderer) {
     }
     qsort(order, faceCount, sizeof(FaceDepth), render3dCompareFaceDepth);
 
-    // draw walls with distance shading
+    // draw with distance shading
     for (int i = 0; i < faceCount; i++) {
         int idx = order[i].index;
         float shade = 1.2f / (0.6f + order[i].depth);
@@ -466,7 +503,7 @@ void wolf3dRender(SDL_Renderer *renderer) {
 
     SDL_Color white = {255, 255, 255, 255};
     drawText("default_font", 10, 10, ANCHOR_TOP_L, white,
-             "3D Maze | WASD move, A/D turn, SPACE jump");
+             "3D Terrain | WASD move, A/D turn, SPACE jump");
     drawText("default_font", 10, 28, ANCHOR_TOP_L, white,
              "FPS: %d", getFPS());
 }
