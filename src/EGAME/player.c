@@ -6,6 +6,8 @@
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/res.h"
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 typedef struct {
     Entity area;
@@ -21,11 +23,12 @@ typedef struct {
     float duration;
     float riseSpeed;
     float baseOffset;
-} ExpPopup;
+    char text[64];
+} PlayerNotification;
 
 static Player player;
 static Slash slash;
-static ExpPopup expPopup;
+static PlayerNotification notification;
 static int slashIdCounter = 0;
 
 static float clampf(float v, float min, float max) {
@@ -34,12 +37,18 @@ static float clampf(float v, float min, float max) {
 
 const Player *playerGet(void) { return &player; }
 
-static void startExpPopup(void) {
-    expPopup.active = 1;
-    expPopup.timer = 0.0f;
-    expPopup.duration = 0.9f;
-    expPopup.riseSpeed = worldTileHeight() * 0.4f;
-    expPopup.baseOffset = worldTileHeight() * 0.2f;
+static void playerNotification(const char *fmt, ...) {
+    if (!fmt) return;
+    notification.active = 1;
+    notification.timer = 0.0f;
+    notification.duration = 0.9f;
+    notification.riseSpeed = worldTileHeight() * 0.4f;
+    notification.baseOffset = worldTileHeight() * 0.2f;
+
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(notification.text, sizeof(notification.text), fmt, args);
+    va_end(args);
 }
 
 static void updateCamera(void) {
@@ -47,8 +56,10 @@ static void updateCamera(void) {
     float viewH = WINH / ZOOM;
     XOFF = player.body.x - viewW * 0.5f;
     YOFF = player.body.y - viewH * 0.5f;
-    XOFF = clampf(XOFF, 0, worldPixelWidth() - viewW);
-    YOFF = clampf(YOFF, 0, worldPixelHeight() - viewH);
+    float maxXOff = fmaxf(0.0f, worldPixelWidth() - viewW);
+    float maxYOff = fmaxf(0.0f, worldPixelHeight() - viewH);
+    XOFF = clampf(XOFF, 0, maxXOff);
+    YOFF = clampf(YOFF, 0, maxYOff);
 }
 
 static void handleMovement(double dt) {
@@ -95,7 +106,7 @@ static void findSpawn(void) {
 }
 
 void playerInit(void) {
-    player.speed = 140.0f;
+    player.speed = 120.0f;
     player.body.halfW = worldTileWidth() * 0.3f;
     player.body.halfH = worldTileHeight() * 0.3f;
     player.wallBlocked = 0;
@@ -104,7 +115,7 @@ void playerInit(void) {
     player.exp = 0;
     player.wood = 0;
     slash.active = 0;
-    expPopup.active = 0;
+    notification.active = 0;
     findSpawn();
     updateCamera();
 }
@@ -139,9 +150,9 @@ void playerTick(double dt) {
         treesApplySlash(&slash.area, 6, slash.id);
     }
 
-    if (expPopup.active) {
-        expPopup.timer += (float)dt;
-        if (expPopup.timer >= expPopup.duration) expPopup.active = 0;
+    if (notification.active) {
+        notification.timer += (float)dt;
+        if (notification.timer >= notification.duration) notification.active = 0;
     }
     updateCamera();
 }
@@ -164,26 +175,40 @@ void playerRender(SDL_Renderer *r) {
         drawWorldRect(sx, sy, sw, sh, slashColor);
     }
 
-    if (expPopup.active) {
-        float alphaRatio = 1.0f - (expPopup.timer / expPopup.duration);
+    if (notification.active) {
+        float alphaRatio = 1.0f - (notification.timer / notification.duration);
         if (alphaRatio < 0.0f) alphaRatio = 0.0f;
         SDL_Color textColor = {255, 255, 255, (Uint8)(255 * alphaRatio)};
-        float rise = expPopup.baseOffset + expPopup.riseSpeed * expPopup.timer;
-        int tx = (int)(player.body.x);
-        int ty = (int)(player.body.y - player.body.halfH - rise);
-        drawText("default_font", tx, ty, ANCHOR_NONE, textColor, "+1 exp");
+        float rise = notification.baseOffset + notification.riseSpeed * notification.timer;
+        float tx = player.body.x;
+        float ty = player.body.y - player.body.halfH - rise;
+        drawWorldTextScaled("default_font", tx, ty, ANCHOR_NONE, textColor, 0.25f,
+                            "%s", notification.text);
     }
 }
 
 void playerAddExp(int amount) {
     if (amount <= 0) return;
     player.exp += amount;
-    startExpPopup();
+    playerNotification("+%d xp", amount);
 }
 
 void playerAddWood(int amount) {
     if (amount <= 0) return;
     player.wood += amount;
+    playerNotification("+%d wood", amount);
+}
+
+int playerCollidesAt(float left, float right, float top, float bottom,
+                     const Entity *ignore) {
+    if (&player.body == ignore) return 0;
+
+    float pLeft = player.body.x - player.body.halfW;
+    float pRight = player.body.x + player.body.halfW;
+    float pTop = player.body.y - player.body.halfH;
+    float pBottom = player.body.y + player.body.halfH;
+
+    return left < pRight && right > pLeft && top < pBottom && bottom > pTop;
 }
 
 int playerGetWood(void) { return player.wood; }

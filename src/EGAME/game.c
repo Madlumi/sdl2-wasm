@@ -5,10 +5,26 @@
 #include "trees.h"
 #include "world.h"
 #include "gameui.h"
+#include "../MENGINE/keys.h"
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
+#include <math.h>
+
+static void handleZoomInput(void) {
+    if (mouseWheelMoved == 0) return;
+
+    const float step = 0.25f;
+    const float minZoom = 1.0f;
+    const float maxZoom = 12.0f;
+
+    float newZoom = (float)ZOOM + (float)mouseWheelMoved * step;
+    newZoom = fmaxf(minZoom, fminf(maxZoom, newZoom));
+    ZOOM = newZoom;
+    mouseWheelMoved = 0;
+}
 
 static void gameTick(double dt) {
+    handleZoomInput();
     worldTick(dt);
     treesTick(dt);
     playerTick(dt);
@@ -28,7 +44,7 @@ static void gameRender(SDL_Renderer *r) {
 void gameInit() {
     worldInit();
     treesInit();
-    ZOOM = 1.5f;
+    ZOOM = 4.0f;
     playerInit();
     npcInit();
     enemyInit();

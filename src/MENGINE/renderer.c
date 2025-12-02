@@ -356,6 +356,151 @@ void drawWorldRect(F left, F top, F w, F h, SDL_Color c) {
     SDL_RenderFillRect(renderer, &r);
 }
 
+static void renderWorldText(TTF_Font *font, F wx, F wy, SDL_Color c, ANCHOR anchor,
+                           F scale, const C* text) {
+    if (!font || !text) return;
+
+    SDL_Surface *s = TTF_RenderUTF8_Blended(font, text, c);
+    if (!s) {
+        THROW("TTF_RenderUTF8_Blended Error: %s\n", TTF_GetError());
+        return;
+    }
+
+    SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
+    if (!t) {
+        SDL_FreeSurface(s);
+        THROW("SDL_CreateTextureFromSurface Error: %s\n", SDL_GetError());
+        return;
+    }
+
+    F screenX = (wx - XOFF) * ZOOM;
+    F screenY = (wy - YOFF) * ZOOM;
+
+    F scaledZoom = ZOOM * fmaxf(scale, 0.01f);
+
+    I w = (I)fmaxf(1.0f, s->w * scaledZoom);
+    I h = (I)fmaxf(1.0f, s->h * scaledZoom);
+    I x = (I)floorf(screenX);
+    I y = (I)floorf(screenY);
+
+    // World text should anchor relative to its own bounds instead of
+    // reapplying the camera transform like UI elements do.
+    switch (anchor) {
+        case ANCHOR_TOP_R:
+            x -= w;
+            break;
+        case ANCHOR_BOT_L:
+            y -= h;
+            break;
+        case ANCHOR_BOT_R:
+            x -= w;
+            y -= h;
+            break;
+        case ANCHOR_MID_L:
+            y -= h / 2;
+            break;
+        case ANCHOR_MID_R:
+            x -= w;
+            y -= h / 2;
+            break;
+        case ANCHOR_MID_BOT:
+            x -= w / 2;
+            y -= h;
+            break;
+        case ANCHOR_MID_TOP:
+            x -= w / 2;
+            break;
+        case ANCHOR_CENTER:
+            x -= w / 2;
+            y -= h / 2;
+            break;
+        case ANCHOR_TOP_L:
+        case ANCHOR_NONE:
+        default:
+            break;
+    }
+
+    SDL_Rect dst = {x, y, w, h};
+    SDL_RenderCopy(renderer, t, NULL, &dst);
+
+    SDL_DestroyTexture(t);
+    SDL_FreeSurface(s);
+}
+
+void drawWorldText(const C* fontName, F wx, F wy, ANCHOR anchor, SDL_Color c,
+                   const C* fmt, ...) {
+    TTF_Font *font = resGetFont(fontName);
+    if (!font) {
+        THROW("Font not found: %s\n", fontName);
+        return;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+
+    char stack_buf[MAX_DRAW_TEXT_LEN];
+    int required_len = vsnprintf(stack_buf, sizeof(stack_buf), fmt, args);
+
+    if (required_len < (int)sizeof(stack_buf)) {
+        va_end(args);
+        renderWorldText(font, wx, wy, c, anchor, 1.0f, stack_buf);
+        return;
+    }
+
+    va_end(args);
+    va_start(args, fmt);
+
+    char *heap_buf = malloc(required_len + 1);
+    if (!heap_buf) {
+        va_end(args);
+        THROW("Memory allocation failed for world text rendering\n");
+        return;
+    }
+
+    vsnprintf(heap_buf, required_len + 1, fmt, args);
+    va_end(args);
+
+    renderWorldText(font, wx, wy, c, anchor, 1.0f, heap_buf);
+    free(heap_buf);
+}
+
+void drawWorldTextScaled(const C* fontName, F wx, F wy, ANCHOR anchor, SDL_Color c,
+                         F scale, const C* fmt, ...) {
+    TTF_Font *font = resGetFont(fontName);
+    if (!font) {
+        THROW("Font not found: %s\n", fontName);
+        return;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+
+    char stack_buf[MAX_DRAW_TEXT_LEN];
+    int required_len = vsnprintf(stack_buf, sizeof(stack_buf), fmt, args);
+
+    if (required_len < (int)sizeof(stack_buf)) {
+        va_end(args);
+        renderWorldText(font, wx, wy, c, anchor, scale, stack_buf);
+        return;
+    }
+
+    va_end(args);
+    va_start(args, fmt);
+
+    char *heap_buf = malloc(required_len + 1);
+    if (!heap_buf) {
+        va_end(args);
+        THROW("Memory allocation failed for world text rendering\n");
+        return;
+    }
+
+    vsnprintf(heap_buf, required_len + 1, fmt, args);
+    va_end(args);
+
+    renderWorldText(font, wx, wy, c, anchor, scale, heap_buf);
+    free(heap_buf);
+}
+
 void drawLine(I x1, I y1, I x2, I y2, SDL_Color c) {
     // For world-space lines, apply camera transform
     if (XOFF != 0 || ZOOM != 1.0) {

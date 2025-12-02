@@ -157,3 +157,21 @@ void enemyApplySlash(const Entity *slash, int damage, int slashId) {
         i++;
     }
 }
+
+int enemyCollidesAt(float left, float right, float top, float bottom,
+                    const Entity *ignore) {
+    for (int i = 0; i < enemyCount; i++) {
+        Enemy *e = &enemies[i];
+        if (&e->body == ignore) continue;
+
+        float eLeft = e->body.x - e->body.halfW;
+        float eRight = e->body.x + e->body.halfW;
+        float eTop = e->body.y - e->body.halfH;
+        float eBottom = e->body.y + e->body.halfH;
+
+        if (left < eRight && right > eLeft && top < eBottom && bottom > eTop) {
+            return 1;
+        }
+    }
+    return 0;
+}

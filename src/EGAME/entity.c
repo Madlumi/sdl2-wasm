@@ -1,6 +1,8 @@
 #include "entity.h"
 #include "world.h"
 #include "trees.h"
+#include "enemy.h"
+#include "player.h"
 #include "../MENGINE/renderer.h"
 #include <math.h>
 
@@ -27,17 +29,17 @@ void healthbarRender(const Entity *anchor, const Health *health, const HealthBar
     if (!anchor || !health || !bar) return;
 
     float ratio = healthRatio(health);
-    int totalW = (int)bar->width;
-    int totalH = (int)bar->height;
+    float totalW = fmaxf(bar->width, 1.0f);
+    float totalH = fmaxf(bar->height, 1.0f);
 
-    int left = (int)(anchor->x - totalW * 0.5f);
-    int top = (int)(anchor->y - anchor->halfH - bar->yOffset - totalH);
+    float left = anchor->x - totalW * 0.5f;
+    float top = anchor->y - anchor->halfH - bar->yOffset - totalH;
 
     SDL_Color bg = bar->backColor;
     SDL_Color fg = bar->fillColor;
 
     drawWorldRect(left, top, totalW, totalH, bg);
-    drawWorldRect(left + 1, top + 1, (int)((totalW - 2) * ratio), totalH - 2, fg);
+    drawWorldRect(left, top, totalW * ratio, totalH, fg);
 }
 
 static int tileSpan(float start, float end, int size, int *outMin, int *outMax) {
@@ -61,7 +63,10 @@ int entityCollidesAt(const Entity *e, float cx, float cy) {
             if (worldTileSolid(tx, ty)) return 1;
         }
     }
+
     if (treesCollidesAt(left, right, top, bottom)) return 1;
+    if (enemyCollidesAt(left, right, top, bottom, e)) return 1;
+    if (playerCollidesAt(left, right, top, bottom, e)) return 1;
     return 0;
 }
 

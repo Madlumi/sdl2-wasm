@@ -64,6 +64,10 @@ void drawRect(I x, I y, I w, I h, ANCHOR anchor, SDL_Color c);
 void drawLine(I x1, I y1, I x2, I y2, SDL_Color c);
 SDL_Rect worldRect(F left, F top, F w, F h);
 void drawWorldRect(F left, F top, F w, F h, SDL_Color c);
+void drawWorldText(const C* fontName, F wx, F wy, ANCHOR anchor, SDL_Color c,
+                   const C* fmt, ...);
+void drawWorldTextScaled(const C* fontName, F wx, F wy, ANCHOR anchor, SDL_Color c,
+                         F scale, const C* fmt, ...);
 
 //==============================================================================================================================
 //========================================             UTILITIES              ==================================================
