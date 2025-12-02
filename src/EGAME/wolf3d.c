@@ -4,33 +4,10 @@
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
 #include "../MENGINE/ui.h"
+#include "level.h"
 #include "render3d.h"
 #include <math.h>
 #include <stdlib.h>
-
-// -------------------------------------------------------------
-// Shared map config (must match level.c)
-// -------------------------------------------------------------
-
-#define MAP_W 50
-#define MAP_H 50
-
-static const float TILE_SIZE   = 1.0f;
-static const float WALL_HEIGHT = 0.1f;
-
-// -------------------------------------------------------------
-// Externs from level.c
-// -------------------------------------------------------------
-
-extern MeshInstance faces[MAP_W * MAP_H * 6];
-extern int faceCount;
-
-extern MeshInstance floorFaces[MAP_W * MAP_H];
-extern int floorCount;
-
-void levelInit(void);
-int   tileHeight(int x, int z);
-float sampleHeightAt(float wx, float wz);
 
 // -------------------------------------------------------------
 // Camera / physics globals
@@ -209,7 +186,8 @@ void wolf3dRender(SDL_Renderer *renderer) {
             &floorFaces[i].mesh,
             floorFaces[i].position,
             floorFaces[i].rotation,
-            floorFaces[i].color);
+            floorFaces[i].color,
+            floorFaces[i].texture);
     }
 
     // sort terrain + walls back-to-front
@@ -242,7 +220,8 @@ void wolf3dRender(SDL_Renderer *renderer) {
             &faces[idx].mesh,
             faces[idx].position,
             faces[idx].rotation,
-            shaded);
+            shaded,
+            faces[idx].texture);
     }
 
     SDL_Color white = {255, 255, 255, 255};
