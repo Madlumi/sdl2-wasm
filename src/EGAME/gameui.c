@@ -1,6 +1,9 @@
 #include "gameui.h"
 #include "player.h"
 #include "../MENGINE/renderer.h"
+#include "../MENGINE/res.h"
+#include <SDL_ttf.h>
+#include <stdio.h>
 
 void gameuiRender(SDL_Renderer *r) {
     (void)r;
@@ -10,29 +13,29 @@ void gameuiRender(SDL_Renderer *r) {
     drawText("default_font", WINW - 10, 10, ANCHOR_TOP_R, white,
              "Zoom %.1fx", ZOOM);
 
-    const Player *p = playerGet();
-    int cycleExp = p ? (p->exp % 10) : 0;
-    float ratio = (float)cycleExp / 10.0f;
-    if (ratio < 0.0f) ratio = 0.0f;
-    if (ratio > 1.0f) ratio = 1.0f;
-
-    int barW = 200;
-    int barH = 12;
-    int margin = 14;
-
-    SDL_Color back = {25, 50, 70, 220};
-    SDL_Color fill = {80, 180, 255, 240};
-
-    drawRect(0, margin, barW, barH, ANCHOR_MID_BOT, back);
-    drawRect(0 + 2, margin + 2, (int)((barW - 4) * ratio), barH - 4, ANCHOR_MID_BOT,
-             fill);
-
     int hotbarSlots = 9;
     int slotSize = 40;
     int slotSpacing = 6;
     int totalW = hotbarSlots * slotSize + (hotbarSlots - 1) * slotSpacing;
     int startX = (WINW - totalW) / 2;
     int startY = WINH - slotSize - 12;
+
+    const Player *p = playerGet();
+    int cycleExp = p ? (p->exp % 10) : 0;
+    float ratio = (float)cycleExp / 10.0f;
+    if (ratio < 0.0f) ratio = 0.0f;
+    if (ratio > 1.0f) ratio = 1.0f;
+
+    int barW = totalW;
+    int barH = 12;
+    int barY = startY - barH - 12;
+
+    SDL_Color back = {25, 50, 70, 220};
+    SDL_Color fill = {80, 180, 255, 240};
+
+    drawRect(startX, barY, barW, barH, ANCHOR_TOP_L, back);
+    drawRect(startX + 2, barY + 2, (int)((barW - 4) * ratio), barH - 4, ANCHOR_TOP_L,
+             fill);
 
     SDL_Color slotBg = {25, 25, 25, 220};
     SDL_Color slotOutline = {90, 90, 90, 255};
@@ -42,6 +45,14 @@ void gameuiRender(SDL_Renderer *r) {
     SDL_Color woodShadow = {90, 60, 30, 255};
 
     int woodCount = p ? playerGetWood() : 0;
+    char woodBuf[32];
+    snprintf(woodBuf, sizeof(woodBuf), "%d", woodCount);
+    int woodTextW = 0;
+    int woodTextH = 0;
+    TTF_Font *woodFont = resGetFont("default_font");
+    if (woodFont && TTF_SizeUTF8(woodFont, woodBuf, &woodTextW, &woodTextH) != 0) {
+        woodTextW = woodTextH = 0;
+    }
     for (int i = 0; i < hotbarSlots; i++) {
         int sx = startX + i * (slotSize + slotSpacing);
         int sy = startY;
@@ -61,8 +72,9 @@ void gameuiRender(SDL_Renderer *r) {
             drawRect(iconLeft + 4, iconTop + iconH / 2 + 2, iconW - 12, 3, ANCHOR_TOP_L,
                      woodShadow);
 
-            drawText("default_font", sx + slotSize - 6, sy + slotSize - 6, ANCHOR_BOT_R,
-                     white, "%d", woodCount);
+            int textX = sx + slotSize - 6 - woodTextW;
+            int textY = sy + slotSize - 6 - woodTextH;
+            drawText("default_font", textX, textY, ANCHOR_TOP_L, white, "%s", woodBuf);
         }
     }
 }
