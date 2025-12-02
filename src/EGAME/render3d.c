@@ -62,7 +62,7 @@ float render3dMeshDepth(const Mesh *mesh, Vec3 position, Vec3 rotation) {
     return depthSum / (float)mesh->vertCount;
 }
 
-void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rotation, SDL_Color baseColor) {
+void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rotation, SDL_Color baseColor, SDL_Texture *texture) {
     if (!renderer || !mesh || !mesh->verts || mesh->indexCount % 3 != 0) return;
 
     int vertTotal = mesh->indexCount * 2; // allow room for clipped triangles
@@ -144,20 +144,24 @@ void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rota
                 verts[v].tex_coord.x = uWrap;
                 verts[v].tex_coord.y = tWrap;
 
-                float rScale = 0.5f + uWrap * 0.5f;
-                float gScale = 0.5f + tWrap * 0.5f;
-                float bScale = 0.35f + (1.0f - (uWrap + tWrap) * 0.5f) * 0.35f;
-                verts[v].color.r = (Uint8)fminf(255.0f, baseColor.r * rScale);
-                verts[v].color.g = (Uint8)fminf(255.0f, baseColor.g * gScale);
-                verts[v].color.b = (Uint8)fminf(255.0f, baseColor.b * bScale);
-                verts[v].color.a = baseColor.a;
+                if (texture) {
+                    verts[v].color = baseColor;
+                } else {
+                    float rScale = 0.5f + uWrap * 0.5f;
+                    float gScale = 0.5f + tWrap * 0.5f;
+                    float bScale = 0.35f + (1.0f - (uWrap + tWrap) * 0.5f) * 0.35f;
+                    verts[v].color.r = (Uint8)fminf(255.0f, baseColor.r * rScale);
+                    verts[v].color.g = (Uint8)fminf(255.0f, baseColor.g * gScale);
+                    verts[v].color.b = (Uint8)fminf(255.0f, baseColor.b * bScale);
+                    verts[v].color.a = baseColor.a;
+                }
                 v++;
             }
         }
     }
 
     if (v > 0) {
-        SDL_RenderGeometry(renderer, NULL, verts, v, NULL, 0);
+        SDL_RenderGeometry(renderer, texture, verts, v, NULL, 0);
     }
 
     free(verts);
@@ -183,6 +187,7 @@ void render3dInitQuadMeshUV(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 
     inst->color = color;
     inst->position = v3(0.0f, 0.0f, 0.0f);
     inst->rotation = v3(0.0f, 0.0f, 0.0f);
+    inst->texture = NULL;
 }
 
 void render3dInitQuadMesh(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 v3, SDL_Color color) {

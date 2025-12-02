@@ -29,6 +29,7 @@ typedef struct {
     SDL_Color color;
     Vec3 position;
     Vec3 rotation;
+    SDL_Texture *texture;
 } MeshInstance;
 
 typedef struct {
@@ -46,7 +47,7 @@ Vec3 v3_cross(Vec3 a, Vec3 b);
 void render3dSetCamera(Camera3D cam);
 Camera3D render3dGetCamera(void);
 float render3dMeshDepth(const Mesh *mesh, Vec3 position, Vec3 rotation);
-void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rotation, SDL_Color baseColor);
+void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rotation, SDL_Color baseColor, SDL_Texture *texture);
 void render3dInitQuadMeshUV(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 v3p, SDL_Color color, SDL_FPoint uv0, SDL_FPoint uv1, SDL_FPoint uv2, SDL_FPoint uv3);
 void render3dInitQuadMesh(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 v3p, SDL_Color color);
 int render3dCompareFaceDepth(const void *a, const void *b);
