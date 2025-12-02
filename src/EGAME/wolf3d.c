@@ -3,6 +3,7 @@
 #include "../MENGINE/keys.h"
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/tick.h"
+#include "../MENGINE/ui.h"
 #include "render3d.h"
 #include <math.h>
 #include <stdlib.h>
@@ -39,6 +40,7 @@ static Vec3 camPos = {1.5f, 0.4f, 1.5f};
 static float camYaw = 0.0f;
 static float camPitch = 0.0f;
 static float fov = 75.0f * (float)M_PI / 180.0f;
+static float fovDegrees = 75.0f;
 
 // jumping / physics
 static float camVelY = 0.0f;
@@ -48,6 +50,39 @@ static const float JUMP_IMPULSE   = 3.0f;
 static const float MAX_FALL_SPEED = -30.0f;
 
 static int   isGrounded = 1;     // start on ground
+static int   uiHandlerIndex = -1;
+
+static void startJump(void) {
+    if (isGrounded) {
+        camVelY = JUMP_IMPULSE;
+        isGrounded = 0;
+    }
+}
+
+static void jumpButtonPressed(Elem *e) {
+    (void)e;
+    startJump();
+}
+
+static void initUi(void) {
+    RECT screenArea = {0, 0, WINW, WINH};
+    uiHandlerIndex = initUiHandler(screenArea);
+    if (uiHandlerIndex < 0) { return; }
+
+    UiHandler *handler = &ui[uiHandlerIndex];
+
+    RECT sliderArea = {20, WINH - 70, 240, 18};
+    Elem *fovSlider = createSlider(sliderArea, "FOV", &fovDegrees, 50.0f, 110.0f);
+    if (fovSlider != NULL) { addElem(handler, fovSlider); }
+
+    RECT buttonArea = {20, WINH - 110, 120, 28};
+    Elem *jumpButton = createButton(buttonArea, "Jump", jumpButtonPressed);
+    if (jumpButton != NULL) { addElem(handler, jumpButton); }
+
+    RECT textboxArea = {WINW - 220, 20, 200, 28};
+    Elem *textbox = createTextbox(textboxArea, "Ready to explore!");
+    if (textbox != NULL) { addElem(handler, textbox); }
+}
 
 // -------------------------------------------------------------
 // Init / tick / render
@@ -63,9 +98,13 @@ void wolf3dInit(void) {
     camPitch = 0.0f;
     camVelY = 0.0f;
     isGrounded = 1;
+    fovDegrees = fov * 180.0f / (float)M_PI;
+
+    initUi();
 }
 
 void wolf3dTick(double dt) {
+    fov = fovDegrees * (float)M_PI / 180.0f;
     float moveSpeed = 3.0f * (float)dt;
     float rotSpeed  = 1.5f * (float)dt;
 
@@ -102,9 +141,8 @@ void wolf3dTick(double dt) {
     }
 
     // start jump if on ground
-    if (Pressed(INP_SPACE) && isGrounded) {
-        camVelY = JUMP_IMPULSE;
-        isGrounded = 0;
+    if (Pressed(INP_SPACE)) {
+        startJump();
     }
 
     // gravity
