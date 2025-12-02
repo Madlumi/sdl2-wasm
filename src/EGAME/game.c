@@ -15,7 +15,7 @@ static void handleZoomInput(void) {
 
     const float step = 0.25f;
     const float minZoom = 1.0f;
-    const float maxZoom = 12.0f;
+    const float maxZoom = 24.0f;
 
     float newZoom = (float)ZOOM + (float)mouseWheelMoved * step;
     newZoom = fmaxf(minZoom, fminf(maxZoom, newZoom));

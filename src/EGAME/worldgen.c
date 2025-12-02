@@ -7,6 +7,7 @@ unsigned char worldgenTileFromChar(char c) {
         case ',': return 1; // sand
         case '~': return 2; // water
         case '#': return 3; // wall
+        case 'w': return 4; // wood
         default:  return 0;
     }
 }

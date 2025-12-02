@@ -19,6 +19,7 @@ void playerTick(double dt);
 void playerRender(SDL_Renderer *r);
 void playerAddExp(int amount);
 void playerAddWood(int amount);
+int playerSpendWood(int amount);
 int playerGetWood(void);
 int playerCollidesAt(float left, float right, float top, float bottom,
                      const Entity *ignore);

@@ -89,6 +89,31 @@ static void handleMovement(double dt) {
     }
 }
 
+static void handlePlacement(void) {
+    if (!Pressed(INP_RCLICK) || player.wood <= 0) return;
+
+    double wx = 0.0, wy = 0.0;
+    screenToWorld(mpos.x, mpos.y, &wx, &wy);
+
+    int tx = (int)floor(wx / worldTileWidth());
+    int ty = (int)floor(wy / worldTileHeight());
+
+    if (worldTileSolid(tx, ty)) return;
+
+    float left = tx * worldTileWidth();
+    float right = left + worldTileWidth();
+    float top = ty * worldTileHeight();
+    float bottom = top + worldTileHeight();
+
+    if (treesCollidesAt(left, right, top, bottom)) return;
+    if (enemyCollidesAt(left, right, top, bottom, NULL)) return;
+    if (playerCollidesAt(left, right, top, bottom, &player.body)) return;
+
+    if (worldPlaceWoodTile(tx, ty) && playerSpendWood(1)) {
+        Mix_PlayChannel(-1, resGetSound("bump"), 0);
+    }
+}
+
 static void findSpawn(void) {
     for (int y = 1; y < worldMapHeight() - 1; y++) {
         for (int x = 1; x < worldMapWidth() - 1; x++) {
@@ -122,6 +147,7 @@ void playerInit(void) {
 
 void playerTick(double dt) {
     handleMovement(dt);
+    handlePlacement();
     if (slash.active) {
         slash.timer += (float)dt;
         enemyApplySlash(&slash.area, 6, slash.id);
@@ -197,6 +223,12 @@ void playerAddWood(int amount) {
     if (amount <= 0) return;
     player.wood += amount;
     playerNotification("+%d wood", amount);
+}
+
+int playerSpendWood(int amount) {
+    if (amount <= 0 || player.wood < amount) return 0;
+    player.wood -= amount;
+    return 1;
 }
 
 int playerCollidesAt(float left, float right, float top, float bottom,

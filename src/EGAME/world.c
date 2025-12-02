@@ -6,7 +6,14 @@
 #include "../lib/FastNoiseLite.h"
 #include <math.h>
 
-enum TileType { TILE_GRASS, TILE_SAND, TILE_WATER, TILE_WALL, TILE_TOTAL };
+enum TileType {
+    TILE_GRASS,
+    TILE_SAND,
+    TILE_WATER,
+    TILE_WALL,
+    TILE_WOOD,
+    TILE_TOTAL
+};
 
 typedef struct {
     SDL_Color baseColor;
@@ -21,6 +28,7 @@ static const TileInfo TILE_INFO[TILE_TOTAL] = {
     [TILE_SAND]  = {{230, 220, 170, 255}, {255, 255, 210, 255}, 0.55f, 4242, 0},
     [TILE_WATER] = {{40, 100, 180, 255}, {15, 60, 130, 255}, 0.4f, 7777, 1},
     [TILE_WALL]  = {{110, 110, 120, 255}, {70, 70, 80, 255}, 0.8f, 9876, 1},
+    [TILE_WOOD]  = {{150, 110, 70, 255}, {180, 140, 90, 255}, 0.3f, 2468, 1},
 };
 
 static SDL_Texture *tileTextures[TILE_TOTAL];
@@ -110,6 +118,16 @@ int worldTileSolid(int tx, int ty) {
 int worldTileIsSand(int tx, int ty) {
     if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return 0;
     return world[indexFor(tx, ty)] == TILE_SAND;
+}
+
+int worldPlaceWoodTile(int tx, int ty) {
+    if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return 0;
+
+    unsigned char *tile = &world[indexFor(tx, ty)];
+    if (TILE_INFO[*tile].solid) return 0;
+
+    *tile = TILE_WOOD;
+    return 1;
 }
 
 static SDL_Rect tileScreenRect(int tx, int ty) {

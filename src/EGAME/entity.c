@@ -49,10 +49,11 @@ static int tileSpan(float start, float end, int size, int *outMin, int *outMax) 
 }
 
 int entityCollidesAt(const Entity *e, float cx, float cy) {
-    float left = cx - e->halfW;
-    float right = cx + e->halfW - 1;
-    float top = cy - e->halfH;
-    float bottom = cy + e->halfH - 1;
+    const float epsilon = 0.001f;
+    float left = cx - e->halfW + epsilon;
+    float right = cx + e->halfW - epsilon;
+    float top = cy - e->halfH + epsilon;
+    float bottom = cy + e->halfH - epsilon;
 
     int startX, endX, startY, endY;
     tileSpan(left, right, worldTileWidth(), &startX, &endX);
@@ -78,6 +79,19 @@ int entityMove(Entity *e, float dx, float dy) {
         if (!entityCollidesAt(e, newX, e->y)) {
             e->x = newX;
         } else {
+            float low = 0.0f, high = 1.0f, best = 0.0f;
+            for (int i = 0; i < 12; i++) {
+                float mid = (low + high) * 0.5f;
+                float testX = e->x + dx * mid;
+                if (!entityCollidesAt(e, testX, e->y)) {
+                    best = mid;
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+
+            if (best > 0.0f) e->x += dx * best;
             blocked = 1;
         }
     }
@@ -87,6 +101,19 @@ int entityMove(Entity *e, float dx, float dy) {
         if (!entityCollidesAt(e, e->x, newY)) {
             e->y = newY;
         } else {
+            float low = 0.0f, high = 1.0f, best = 0.0f;
+            for (int i = 0; i < 12; i++) {
+                float mid = (low + high) * 0.5f;
+                float testY = e->y + dy * mid;
+                if (!entityCollidesAt(e, e->x, testY)) {
+                    best = mid;
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+
+            if (best > 0.0f) e->y += dy * best;
             blocked = 1;
         }
     }
