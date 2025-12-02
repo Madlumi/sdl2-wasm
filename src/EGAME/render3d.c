@@ -65,13 +65,17 @@ float render3dMeshDepth(const Mesh *mesh, Vec3 position, Vec3 rotation) {
 void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rotation, SDL_Color baseColor) {
     if (!renderer || !mesh || !mesh->verts || mesh->indexCount % 3 != 0) return;
 
-    int vertTotal = mesh->indexCount * 2; // allow room for clipped triangles
+    int vertTotal = mesh->indexCount * 256; // generous room for clipping + subdivision
+    if (vertTotal < 256) vertTotal = 256;
+
     SDL_Vertex *verts = calloc((size_t)vertTotal, sizeof(SDL_Vertex));
     if (!verts) return;
 
     Vec3 forward, right, upVec;
     cameraBasis(&forward, &right, &upVec);
-    const float NEAR_PLANE = 0.05f;
+    // Push the near plane out a bit so geometry right under the camera
+    // doesn't blow up from the perspective divide.
+    const float NEAR_PLANE = 0.2f;
     float aspect = (float)WINW / (float)WINH;
     float f = 1.0f / tanf(gCamera.fov * 0.5f);
 
@@ -129,35 +133,105 @@ void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rota
         if (clipCount < 3) continue;
 
         for (int j = 1; j < clipCount - 1; j++) {
-            ViewVert tri[3] = {clipped[0], clipped[j], clipped[j + 1]};
-            for (int k = 0; k < 3; k++) {
-                float uWrap = tri[k].u - floorf(tri[k].u);
-                float tWrap = tri[k].t - floorf(tri[k].t);
-                if (uWrap == 0.0f && tri[k].u > 0.0f) uWrap = 1.0f;
-                if (tWrap == 0.0f && tri[k].t > 0.0f) tWrap = 1.0f;
+            typedef struct { ViewVert tri[3]; int depth; } TriWork;
+            TriWork stack[64];
+            int stackCount = 0;
+            stack[stackCount++] = (TriWork){{clipped[0], clipped[j], clipped[j + 1]}, 0};
 
-                float nx = (tri[k].x * f / aspect) / tri[k].z;
-                float ny = (tri[k].y * f) / tri[k].z;
+            const int MAX_SUBDIV = 3;
+            const float MAX_DEPTH_RATIO = 1.35f;
 
-                verts[v].position.x = (nx * 0.5f + 0.5f) * WINW;
-                verts[v].position.y = (1.0f - (ny * 0.5f + 0.5f)) * WINH;
-                verts[v].tex_coord.x = uWrap;
-                verts[v].tex_coord.y = tWrap;
+            while (stackCount > 0) {
+                TriWork work = stack[--stackCount];
+                ViewVert *tri = work.tri;
 
-                float rScale = 0.5f + uWrap * 0.5f;
-                float gScale = 0.5f + tWrap * 0.5f;
-                float bScale = 0.35f + (1.0f - (uWrap + tWrap) * 0.5f) * 0.35f;
-                verts[v].color.r = (Uint8)fminf(255.0f, baseColor.r * rScale);
-                verts[v].color.g = (Uint8)fminf(255.0f, baseColor.g * gScale);
-                verts[v].color.b = (Uint8)fminf(255.0f, baseColor.b * bScale);
-                verts[v].color.a = baseColor.a;
-                v++;
+                float minZ = fminf(tri[0].z, fminf(tri[1].z, tri[2].z));
+                float maxZ = fmaxf(tri[0].z, fmaxf(tri[1].z, tri[2].z));
+                int shouldSubdivide = (work.depth < MAX_SUBDIV) && (maxZ / fmaxf(0.0001f, minZ) > MAX_DEPTH_RATIO);
+
+                if (shouldSubdivide) {
+                    ViewVert ab, bc, ca;
+                    ab.x = 0.5f * (tri[0].x + tri[1].x);
+                    ab.y = 0.5f * (tri[0].y + tri[1].y);
+                    ab.z = 0.5f * (tri[0].z + tri[1].z);
+                    ab.u = 0.5f * (tri[0].u + tri[1].u);
+                    ab.t = 0.5f * (tri[0].t + tri[1].t);
+
+                    bc.x = 0.5f * (tri[1].x + tri[2].x);
+                    bc.y = 0.5f * (tri[1].y + tri[2].y);
+                    bc.z = 0.5f * (tri[1].z + tri[2].z);
+                    bc.u = 0.5f * (tri[1].u + tri[2].u);
+                    bc.t = 0.5f * (tri[1].t + tri[2].t);
+
+                    ca.x = 0.5f * (tri[2].x + tri[0].x);
+                    ca.y = 0.5f * (tri[2].y + tri[0].y);
+                    ca.z = 0.5f * (tri[2].z + tri[0].z);
+                    ca.u = 0.5f * (tri[2].u + tri[0].u);
+                    ca.t = 0.5f * (tri[2].t + tri[0].t);
+
+                    TriWork children[4] = {
+                        {{tri[0], ab, ca}, work.depth + 1},
+                        {{ab, tri[1], bc}, work.depth + 1},
+                        {{ca, bc, tri[2]}, work.depth + 1},
+                        {{ab, bc, ca}, work.depth + 1},
+                    };
+
+                    for (int c = 0; c < 4 && stackCount < (int)(sizeof(stack) / sizeof(stack[0])); c++) {
+                        stack[stackCount++] = children[c];
+                    }
+                    continue;
+                }
+
+                for (int k = 0; k < 3; k++) {
+                    if (v + 3 > vertTotal) {
+                        int newTotal = vertTotal * 2;
+                        while (v + 3 > newTotal) newTotal *= 2;
+
+                        SDL_Vertex *grown = realloc(verts, (size_t)newTotal * sizeof(SDL_Vertex));
+                        if (!grown) {
+                            free(verts);
+                            return;
+                        }
+
+                        verts = grown;
+                        vertTotal = newTotal;
+                    }
+
+                    float uWrap = tri[k].u - floorf(tri[k].u);
+                    float tWrap = tri[k].t - floorf(tri[k].t);
+                    if (uWrap == 0.0f && tri[k].u > 0.0f) uWrap = 1.0f;
+                    if (tWrap == 0.0f && tri[k].t > 0.0f) tWrap = 1.0f;
+
+                    float nx = (tri[k].x * f / aspect) / tri[k].z;
+                    float ny = (tri[k].y * f) / tri[k].z;
+
+                    verts[v].position.x = (nx * 0.5f + 0.5f) * WINW;
+                    verts[v].position.y = (1.0f - (ny * 0.5f + 0.5f)) * WINH;
+                    verts[v].tex_coord.x = uWrap;
+                    verts[v].tex_coord.y = tWrap;
+
+                    if (mesh->texture) {
+                        verts[v].color.r = baseColor.r;
+                        verts[v].color.g = baseColor.g;
+                        verts[v].color.b = baseColor.b;
+                        verts[v].color.a = baseColor.a;
+                    } else {
+                        float rScale = 0.5f + uWrap * 0.5f;
+                        float gScale = 0.5f + tWrap * 0.5f;
+                        float bScale = 0.35f + (1.0f - (uWrap + tWrap) * 0.5f) * 0.35f;
+                        verts[v].color.r = (Uint8)fminf(255.0f, baseColor.r * rScale);
+                        verts[v].color.g = (Uint8)fminf(255.0f, baseColor.g * gScale);
+                        verts[v].color.b = (Uint8)fminf(255.0f, baseColor.b * bScale);
+                        verts[v].color.a = baseColor.a;
+                    }
+                    v++;
+                }
             }
         }
     }
 
     if (v > 0) {
-        SDL_RenderGeometry(renderer, NULL, verts, v, NULL, 0);
+        SDL_RenderGeometry(renderer, mesh->texture, verts, v, NULL, 0);
     }
 
     free(verts);
@@ -180,6 +254,7 @@ void render3dInitQuadMeshUV(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 
     inst->mesh.vertCount = 4;
     inst->mesh.indices = inst->indices;
     inst->mesh.indexCount = 6;
+    inst->mesh.texture = NULL;
     inst->color = color;
     inst->position = v3(0.0f, 0.0f, 0.0f);
     inst->rotation = v3(0.0f, 0.0f, 0.0f);

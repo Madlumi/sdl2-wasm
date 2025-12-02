@@ -200,7 +200,12 @@ void wolf3dTick(double dt) {
 }
 
 void wolf3dRender(SDL_Renderer *renderer) {
-    Camera3D cam = {camPos, camYaw, camPitch, fov};
+    // Render from slightly behind the player so nearby tiles don't straddle
+    // the near plane and warp when the closest vertices leave the view.
+    Vec3 forward = v3(cosf(camYaw) * cosf(camPitch), sinf(camPitch), sinf(camYaw) * cosf(camPitch));
+    Vec3 renderPos = v3_sub(camPos, v3_scale(forward, TILE_SIZE));
+
+    Camera3D cam = {renderPos, camYaw, camPitch, fov};
     render3dSetCamera(cam);
 
     // floor (optional, mostly hidden by terrain)

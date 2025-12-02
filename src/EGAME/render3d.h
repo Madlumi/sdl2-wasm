@@ -12,6 +12,7 @@ typedef struct {
     int vertCount;
     const int *indices;
     int indexCount;
+    SDL_Texture *texture;
 } Mesh;
 
 typedef struct {
