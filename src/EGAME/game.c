@@ -109,20 +109,17 @@ static void tileButtonRender(Elem *e, SDL_Renderer *r) {
             break;
     }
     
-    // Apply tint to texture and draw centered in button
     SDL_Texture *tex = resGetTexture(texName);
     if (tex) {
         SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
         drawTexture(texName, area.x + area.w/2, area.y + area.h/2 - 10, ANCHOR_CENTER, NULL);
-        SDL_SetTextureColorMod(tex, 255, 255, 255); // Reset
+        SDL_SetTextureColorMod(tex, 255, 255, 255);
     }
     
-    // Draw label at bottom of button
     SDL_Color textColor = {255, 255, 255, 255};
     drawText("default_font", area.x + area.w/2, area.y + area.h - 5, 
              ANCHOR_CENTER, textColor, tb->label);
     
-    // Draw border
     SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
     SDL_RenderDrawRect(r, &area);
 }
@@ -147,14 +144,10 @@ static void handleZoom(double dt) {
         ZOOM += ZOOM_SPEED;
         if (ZOOM > MAX_ZOOM) ZOOM = MAX_ZOOM;
         
-        // Zoom towards mouse position
         if (ZOOM != oldZoom) {
             float zoomFactor = ZOOM / oldZoom;
-            
-            // Convert mouse position to world coordinates
             float worldMouseX = mpos.x / oldZoom + XOFF;
             float worldMouseY = mpos.y / oldZoom + YOFF;
-            
             XOFF = worldMouseX - (worldMouseX - XOFF) / zoomFactor;
             YOFF = worldMouseY - (worldMouseY - YOFF) / zoomFactor;
         }
@@ -164,14 +157,10 @@ static void handleZoom(double dt) {
         ZOOM -= ZOOM_SPEED;
         if (ZOOM < MIN_ZOOM) ZOOM = MIN_ZOOM;
         
-        // Zoom towards mouse position
         if (ZOOM != oldZoom) {
             float zoomFactor = ZOOM / oldZoom;
-            
-            // Convert mouse position to world coordinates
             float worldMouseX = mpos.x / oldZoom + XOFF;
             float worldMouseY = mpos.y / oldZoom + YOFF;
-            
             XOFF = worldMouseX - (worldMouseX - XOFF) / zoomFactor;
             YOFF = worldMouseY - (worldMouseY - YOFF) / zoomFactor;
         }
@@ -182,7 +171,6 @@ static void handleZoom(double dt) {
 static void handleEdgePanning(double dt) {
     float panDistance = PAN_SPEED * dt / ZOOM;
     
-    // Check if mouse is near edges and pan accordingly
     if (mpos.x <= EDGE_PAN_MARGIN) {
         XOFF -= panDistance;
     } else if (mpos.x >= WINW - EDGE_PAN_MARGIN) {
@@ -200,11 +188,9 @@ static void gameTick(double dt) {
     handleZoom(dt);
     handleEdgePanning(dt);
     
-    // Convert mouse position to world coordinates
     float worldMouseX = mpos.x / ZOOM + XOFF;
     float worldMouseY = mpos.y / ZOOM + YOFF;
     
-    // Convert world coordinates to tile coordinates
     int tx = (int)(worldMouseX / tileW);
     int ty = (int)(worldMouseY / tileH);
     
@@ -256,14 +242,32 @@ static void gameTick(double dt) {
     }
 }
 
+// helper to get exact tile rect with no gaps at any zoom
+static SDL_Rect tileScreenRect(int tx, int ty) {
+    float fx = ((float)tx * tileW - XOFF) * ZOOM;
+    float fy = ((float)ty * tileH - YOFF) * ZOOM;
+    float fx2 = ((float)(tx + 1) * tileW - XOFF) * ZOOM;
+    float fy2 = ((float)(ty + 1) * tileH - YOFF) * ZOOM;
+
+    int sx  = (int)floorf(fx);
+    int sy  = (int)floorf(fy);
+    int sx2 = (int)ceilf(fx2);
+    int sy2 = (int)ceilf(fy2);
+
+    SDL_Rect r;
+    r.x = sx;
+    r.y = sy;
+    r.w = sx2 - sx;
+    r.h = sy2 - sy;
+    return r;
+}
+
 static void renderWorld(SDL_Renderer *r) {
-    // Convert mouse position to world coordinates for hover detection
     float worldMouseX = mpos.x / ZOOM + XOFF;
     float worldMouseY = mpos.y / ZOOM + YOFF;
     int hoverX = (int)(worldMouseX / tileW);
     int hoverY = (int)(worldMouseY / tileH);
 
-    // Calculate visible tile range for culling (XOFF/YOFF are world top-left)
     float viewWidth = WINW / ZOOM;
     float viewHeight = WINH / ZOOM;
 
@@ -277,12 +281,11 @@ static void renderWorld(SDL_Renderer *r) {
     int startTileY = (int)fmaxf(0.0f, floorf(worldTop   / tileH));
     int endTileY   = (int)fminf((float)tilesY, ceilf(worldBottom / tileH));
 
-    // Render terrain
+    // terrain
     for (int ty = startTileY; ty < endTileY; ty++) {
         for (int tx = startTileX; tx < endTileX; tx++) {
             Tile *tile = &tiles[ty * tilesX + tx];
             
-            // Determine texture and color based on tile type
             const char* texName = "sand";
             SDL_Color tint = {255, 255, 255, 255};
             switch (tile->type) {
@@ -309,37 +312,24 @@ static void renderWorld(SDL_Renderer *r) {
             SDL_Texture *tex = resGetTexture(texName);
             if (tex) {
                 SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
-
-                int sx, sy;
-                worldToScreen(tx * tileW, ty * tileH, &sx, &sy);
-                SDL_Rect dst = { sx, sy, (int)(tileW * ZOOM), (int)(tileH * ZOOM) };
-
+                SDL_Rect dst = tileScreenRect(tx, ty);
                 SDL_RenderCopy(r, tex, NULL, &dst);
-                SDL_SetTextureColorMod(tex, 255, 255, 255); // Reset
+                SDL_SetTextureColorMod(tex, 255, 255, 255);
             }
             
-            // Draw hover highlight
             if (tx == hoverX && ty == hoverY &&
                 hoverX >= 0 && hoverY >= 0 &&
                 hoverX < tilesX && hoverY < tilesY) {
 
                 SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(r, 255, 255, 255, 80);
-                
-                int screenX, screenY;
-                worldToScreen(tx * tileW, ty * tileH, &screenX, &screenY);
-                SDL_Rect highlightRect = {
-                    screenX,
-                    screenY,
-                    (int)(tileW * ZOOM),
-                    (int)(tileH * ZOOM)
-                };
-                SDL_RenderFillRect(r, &highlightRect);
+                SDL_Rect h = tileScreenRect(tx, ty);
+                SDL_RenderFillRect(r, &h);
             }
         }
     }
     
-    // Render objects on top of terrain
+    // objects
     for (int ty = startTileY; ty < endTileY; ty++) {
         for (int tx = startTileX; tx < endTileX; tx++) {
             Tile *tile = &tiles[ty * tilesX + tx];
@@ -375,18 +365,12 @@ static void renderWorld(SDL_Renderer *r) {
                     if (objTex) {
                         SDL_SetTextureColorMod(objTex, objTint.r, objTint.g, objTint.b);
                         
-                        // World position at tile center
-                        int objWorldX = tx * tileW + tileW / 2;
-                        int objWorldY = ty * tileH + tileH / 2;
-
-                        int sx, sy;
-                        worldToScreen(objWorldX, objWorldY, &sx, &sy);
-
-                        int w = (int)(tileW * objScale * ZOOM);
-                        int h = (int)(tileH * objScale * ZOOM);
+                        SDL_Rect tr = tileScreenRect(tx, ty);
+                        int w = (int)(tr.w * objScale);
+                        int h = (int)(tr.h * objScale);
                         SDL_Rect dst = {
-                            sx - w / 2,
-                            sy - h / 2,
+                            tr.x + tr.w / 2 - w / 2,
+                            tr.y + tr.h / 2 - h / 2,
                             w,
                             h
                         };
@@ -401,46 +385,34 @@ static void renderWorld(SDL_Renderer *r) {
 }
 
 static void renderUI(SDL_Renderer *r) {
-    // UI elements (drawn on top of everything)
     SDL_Color white = {255, 255, 255, 255};
     
-    // Coconut counter (top right)
     drawTexture("coconut", WINW - 30, 20, ANCHOR_TOP_R, NULL);
     drawText("default_font", WINW - 40, 20, ANCHOR_TOP_R, white, "%d", coconutCount);
     
-    // Zoom level indicator (top left)
     drawText("default_font", 10, 10, ANCHOR_TOP_L, white, "Zoom: %.1fx", ZOOM);
     
-    // Instructions (bottom center)
     drawText("default_font", WINW/2, WINH - 10, ANCHOR_MID_BOT, white, 
              "WASD/Edge pan - Move | Mouse Wheel - Zoom | Click - Place tiles");
 }
 
 static void gameRender(SDL_Renderer *r) {
-    // Render world (terrain + objects)
     renderWorld(r);
-    
-    // Render UI on top
     renderUI(r);
 }
 
 void gameInit() {
-    // Get tile dimensions from water texture
     SDL_Texture *waterTex = resGetTexture("water");
     SDL_QueryTexture(waterTex, NULL, NULL, &tileW, &tileH);
     
-    // Create a large world
     tilesX = 100;
     tilesY = 100;
     
     tiles = malloc(sizeof(Tile) * tilesX * tilesY);
-    coconutCount = 10; // Start with some coconuts
+    coconutCount = 10;
     
-    // Set initial zoom
     ZOOM = 1.0f;
 
-    // Initialize camera so that the view is centered on the world.
-    // XOFF/YOFF are treated as world-space top-left of the screen.
     float viewWidth  = WINW / ZOOM;
     float viewHeight = WINH / ZOOM;
     float worldWidth  = tilesX * tileW;
@@ -449,12 +421,10 @@ void gameInit() {
     XOFF = worldWidth  * 0.5f - viewWidth  * 0.5f;
     YOFF = worldHeight * 0.5f - viewHeight * 0.5f;
     
-    // Initialize world with water and a central island
     for (int ty = 0; ty < tilesY; ty++) {
         for (int tx = 0; tx < tilesX; tx++) {
             Tile *t = &tiles[ty * tilesX + tx];
             
-            // Create island in the center
             float dx = (float)tx - (float)(tilesX / 2);
             float dy = (float)ty - (float)(tilesY / 2);
             float distFromCenter = sqrtf(dx * dx + dy * dy);
@@ -472,7 +442,6 @@ void gameInit() {
         }
     }
     
-    // Add a tree in the center
     int centerX = tilesX / 2;
     int centerY = tilesY / 2;
     Tile *center = &tiles[centerY * tilesX + centerX];
@@ -480,18 +449,15 @@ void gameInit() {
     center->obj = OBJ_TREE;
     center->timer = 0;
 
-    // Register game functions
     tickF_add(gameTick);
     renderF_add(gameRender);
 
-    // Create UI buttons (positioned properly)
     int handler = initUiHandler((RECT){10, WINH - 90, WINW - 20, 80});
     int buttonSize = 70;
     int gap = 10;
     const char *labels[] = {"Grass", "Water", "Sand", "Stone", "Dirt"};
     int types[] = {TILE_GRASS, TILE_WATER, TILE_SAND, TILE_STONE, TILE_DIRT};
     
-    // Calculate total width needed for buttons
     int totalWidth = 5 * buttonSize + 4 * gap;
     int startX = (WINW - totalWidth) / 2;
     
