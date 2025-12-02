@@ -3,7 +3,7 @@
 #include <SDL.h>
 #include "entity.h"
 
-typedef struct { Entity body; float speed; } Player;
+typedef struct { Entity body; float speed; int wallBlocked; } Player;
 
 const Player *playerGet(void);
 void playerInit(void);

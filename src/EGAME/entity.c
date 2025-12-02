@@ -26,10 +26,26 @@ int entityCollidesAt(const Entity *e, float cx, float cy) {
     return 0;
 }
 
-void entityMove(Entity *e, float dx, float dy) {
-    float newX = e->x + dx;
-    if (!entityCollidesAt(e, newX, e->y)) e->x = newX;
+int entityMove(Entity *e, float dx, float dy) {
+    int blocked = 0;
 
-    float newY = e->y + dy;
-    if (!entityCollidesAt(e, e->x, newY)) e->y = newY;
+    if (dx != 0.0f) {
+        float newX = e->x + dx;
+        if (!entityCollidesAt(e, newX, e->y)) {
+            e->x = newX;
+        } else {
+            blocked = 1;
+        }
+    }
+
+    if (dy != 0.0f) {
+        float newY = e->y + dy;
+        if (!entityCollidesAt(e, e->x, newY)) {
+            e->y = newY;
+        } else {
+            blocked = 1;
+        }
+    }
+
+    return blocked;
 }

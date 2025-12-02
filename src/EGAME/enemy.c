@@ -25,8 +25,8 @@ void enemyTick(double dt) {
     if (len > 1.0f) {
         dirX /= len;
         dirY /= len;
-        entityMove(&enemy, dirX * chaseSpeed * (float)dt,
-                   dirY * chaseSpeed * (float)dt);
+        (void)entityMove(&enemy, dirX * chaseSpeed * (float)dt,
+                         dirY * chaseSpeed * (float)dt);
     }
 }
 

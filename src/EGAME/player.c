@@ -2,6 +2,7 @@
 #include "world.h"
 #include "../MENGINE/keys.h"
 #include "../MENGINE/renderer.h"
+#include "../MENGINE/res.h"
 #include <math.h>
 
 static Player player;
@@ -34,7 +35,15 @@ static void handleMovement(double dt) {
         dirY /= len;
         float stepX = dirX * player.speed * (float)dt;
         float stepY = dirY * player.speed * (float)dt;
-        entityMove(&player.body, stepX, stepY);
+        int blocked = entityMove(&player.body, stepX, stepY);
+        if (blocked && !player.wallBlocked) {
+            Mix_PlayChannel(-1, resGetSound("bump"), 0);
+            player.wallBlocked = 1;
+        } else if (!blocked) {
+            player.wallBlocked = 0;
+        }
+    } else {
+        player.wallBlocked = 0;
     }
 }
 
@@ -54,6 +63,7 @@ void playerInit(void) {
     player.speed = 140.0f;
     player.body.halfW = worldTileWidth() * 0.3f;
     player.body.halfH = worldTileHeight() * 0.3f;
+    player.wallBlocked = 0;
     findSpawn();
     updateCamera();
 }

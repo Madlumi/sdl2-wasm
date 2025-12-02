@@ -4,6 +4,6 @@
 typedef struct { float x, y, halfW, halfH; } Entity;
 
 int entityCollidesAt(const Entity *e, float cx, float cy);
-void entityMove(Entity *e, float dx, float dy);
+int entityMove(Entity *e, float dx, float dy);
 
 #endif
