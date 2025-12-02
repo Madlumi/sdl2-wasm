@@ -3,10 +3,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
 static Camera3D gCamera = {{0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, 75.0f * (float)M_PI / 180.0f};
 
 Vec3 v3(float x, float y, float z) { Vec3 v = {x, y, z}; return v; }
@@ -114,12 +110,14 @@ void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rota
 
             float u = (mesh->uvs && idx < mesh->vertCount) ? mesh->uvs[idx].x : 0.0f;
             float t = (mesh->uvs && idx < mesh->vertCount) ? mesh->uvs[idx].y : 0.0f;
-            tri[triCount].tex_coord.x = u;
-            tri[triCount].tex_coord.y = t;
+            float uWrap = u - floorf(u);
+            float tWrap = t - floorf(t);
+            tri[triCount].tex_coord.x = uWrap;
+            tri[triCount].tex_coord.y = tWrap;
 
-            float rScale = 0.5f + u * 0.5f;
-            float gScale = 0.5f + t * 0.5f;
-            float bScale = 0.35f + (1.0f - (u + t) * 0.5f) * 0.35f;
+            float rScale = 0.5f + uWrap * 0.5f;
+            float gScale = 0.5f + tWrap * 0.5f;
+            float bScale = 0.35f + (1.0f - (uWrap + tWrap) * 0.5f) * 0.35f;
             tri[triCount].color.r = (Uint8)fminf(255.0f, baseColor.r * rScale);
             tri[triCount].color.g = (Uint8)fminf(255.0f, baseColor.g * gScale);
             tri[triCount].color.b = (Uint8)fminf(255.0f, baseColor.b * bScale);
@@ -139,4 +137,39 @@ void drawMesh(SDL_Renderer *renderer, const Mesh *mesh, Vec3 position, Vec3 rota
     }
 
     free(verts);
+}
+
+void render3dInitQuadMeshUV(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 v3p, SDL_Color color, SDL_FPoint uv0, SDL_FPoint uv1, SDL_FPoint uv2, SDL_FPoint uv3) {
+    if (!inst) return;
+    inst->verts[0] = v0;
+    inst->verts[1] = v1;
+    inst->verts[2] = v2;
+    inst->verts[3] = v3p;
+    inst->uvs[0] = uv0;
+    inst->uvs[1] = uv1;
+    inst->uvs[2] = uv2;
+    inst->uvs[3] = uv3;
+    inst->indices[0] = 0; inst->indices[1] = 1; inst->indices[2] = 2;
+    inst->indices[3] = 0; inst->indices[4] = 2; inst->indices[5] = 3;
+    inst->mesh.verts = inst->verts;
+    inst->mesh.uvs = inst->uvs;
+    inst->mesh.vertCount = 4;
+    inst->mesh.indices = inst->indices;
+    inst->mesh.indexCount = 6;
+    inst->color = color;
+    inst->position = v3(0.0f, 0.0f, 0.0f);
+    inst->rotation = v3(0.0f, 0.0f, 0.0f);
+}
+
+void render3dInitQuadMesh(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 v3, SDL_Color color) {
+    render3dInitQuadMeshUV(inst, v0, v1, v2, v3, color,
+                           (SDL_FPoint){0.0f, 0.0f}, (SDL_FPoint){1.0f, 0.0f}, (SDL_FPoint){1.0f, 1.0f}, (SDL_FPoint){0.0f, 1.0f});
+}
+
+int render3dCompareFaceDepth(const void *a, const void *b) {
+    float da = ((const FaceDepth *)a)->depth;
+    float db = ((const FaceDepth *)b)->depth;
+    if (da < db) return 1;
+    if (da > db) return -1;
+    return 0;
 }

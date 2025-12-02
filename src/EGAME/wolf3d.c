@@ -6,25 +6,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-typedef struct {
-    Mesh mesh;
-    Vec3 verts[4];
-    SDL_FPoint uvs[4];
-    int indices[6];
-    SDL_Color color;
-    Vec3 position;
-    Vec3 rotation;
-} MeshInstance;
-
-typedef struct {
-    int index;
-    float depth;
-} FaceDepth;
-
 static const char *LEVEL[] = {
     "1111111111",
     "1........1",
@@ -50,38 +31,9 @@ static float camYaw = 0.0f;
 static float camPitch = 0.0f;
 static float fov = 75.0f * (float)M_PI / 180.0f;
 
-static int compareFaceDepth(const void *a, const void *b) {
-    float da = ((const FaceDepth *)a)->depth;
-    float db = ((const FaceDepth *)b)->depth;
-    if (da < db) return 1;
-    if (da > db) return -1;
-    return 0;
-}
-
 static int isWall(int x, int z) {
     if (x < 0 || z < 0 || x >= MAP_W || z >= MAP_H) return 1;
     return LEVEL[z][x] == '1';
-}
-
-static void initQuadMesh(MeshInstance *inst, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 v3p, SDL_Color color) {
-    inst->verts[0] = v0;
-    inst->verts[1] = v1;
-    inst->verts[2] = v2;
-    inst->verts[3] = v3p;
-    inst->uvs[0] = (SDL_FPoint){0.0f, 0.0f};
-    inst->uvs[1] = (SDL_FPoint){1.0f, 0.0f};
-    inst->uvs[2] = (SDL_FPoint){1.0f, 1.0f};
-    inst->uvs[3] = (SDL_FPoint){0.0f, 1.0f};
-    inst->indices[0] = 0; inst->indices[1] = 1; inst->indices[2] = 2;
-    inst->indices[3] = 0; inst->indices[4] = 2; inst->indices[5] = 3;
-    inst->mesh.verts = inst->verts;
-    inst->mesh.uvs = inst->uvs;
-    inst->mesh.vertCount = 4;
-    inst->mesh.indices = inst->indices;
-    inst->mesh.indexCount = 6;
-    inst->color = color;
-    inst->position = v3(0.0f, 0.0f, 0.0f);
-    inst->rotation = v3(0.0f, 0.0f, 0.0f);
 }
 
 static void buildLevel(void) {
@@ -96,19 +48,19 @@ static void buildLevel(void) {
             SDL_Color light = {220, 220, 240, 255};
 
             if (!isWall(x, z - 1) && faceCount < (int)(sizeof(faces) / sizeof(faces[0]))) {
-                initQuadMesh(&faces[faceCount++], v3(fx, 0, fz), v3(fx + TILE_SIZE, 0, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), v3(fx, WALL_HEIGHT, fz), base);
+                render3dInitQuadMesh(&faces[faceCount++], v3(fx, 0, fz), v3(fx + TILE_SIZE, 0, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), v3(fx, WALL_HEIGHT, fz), base);
             }
             if (!isWall(x + 1, z) && faceCount < (int)(sizeof(faces) / sizeof(faces[0]))) {
-                initQuadMesh(&faces[faceCount++], v3(fx + TILE_SIZE, 0, fz), v3(fx + TILE_SIZE, 0, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), light);
+                render3dInitQuadMesh(&faces[faceCount++], v3(fx + TILE_SIZE, 0, fz), v3(fx + TILE_SIZE, 0, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), light);
             }
             if (!isWall(x, z + 1) && faceCount < (int)(sizeof(faces) / sizeof(faces[0]))) {
-                initQuadMesh(&faces[faceCount++], v3(fx + TILE_SIZE, 0, fz + TILE_SIZE), v3(fx, 0, fz + TILE_SIZE), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), base);
+                render3dInitQuadMesh(&faces[faceCount++], v3(fx + TILE_SIZE, 0, fz + TILE_SIZE), v3(fx, 0, fz + TILE_SIZE), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), base);
             }
             if (!isWall(x - 1, z) && faceCount < (int)(sizeof(faces) / sizeof(faces[0]))) {
-                initQuadMesh(&faces[faceCount++], v3(fx, 0, fz + TILE_SIZE), v3(fx, 0, fz), v3(fx, WALL_HEIGHT, fz), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), shadow);
+                render3dInitQuadMesh(&faces[faceCount++], v3(fx, 0, fz + TILE_SIZE), v3(fx, 0, fz), v3(fx, WALL_HEIGHT, fz), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), shadow);
             }
             if (faceCount < (int)(sizeof(faces) / sizeof(faces[0]))) {
-                initQuadMesh(&faces[faceCount++], v3(fx, WALL_HEIGHT, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), light);
+                render3dInitQuadMesh(&faces[faceCount++], v3(fx, WALL_HEIGHT, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz), v3(fx + TILE_SIZE, WALL_HEIGHT, fz + TILE_SIZE), v3(fx, WALL_HEIGHT, fz + TILE_SIZE), light);
             }
         }
     }
@@ -130,8 +82,13 @@ static void buildFloor(void) {
 
     SDL_Color floorColor = {70, 90, 110, 255};
     SDL_Color ceilingColor = {40, 45, 65, 255};
-    initQuadMesh(&floorMeshes[0], floorVerts[0], floorVerts[1], floorVerts[2], floorVerts[3], floorColor);
-    initQuadMesh(&floorMeshes[1], ceilingVerts[0], ceilingVerts[1], ceilingVerts[2], ceilingVerts[3], ceilingColor);
+    float tileScale = 0.5f;
+    SDL_FPoint floorUV[4] = {{0.0f, 0.0f}, {MAP_W * tileScale, 0.0f}, {MAP_W * tileScale, MAP_H * tileScale}, {0.0f, MAP_H * tileScale}};
+    SDL_FPoint ceilUV[4] = {{0.0f, 0.0f}, {MAP_W * tileScale, 0.0f}, {MAP_W * tileScale, MAP_H * tileScale}, {0.0f, MAP_H * tileScale}};
+    render3dInitQuadMeshUV(&floorMeshes[0], floorVerts[0], floorVerts[1], floorVerts[2], floorVerts[3], floorColor,
+                           floorUV[0], floorUV[1], floorUV[2], floorUV[3]);
+    render3dInitQuadMeshUV(&floorMeshes[1], ceilingVerts[0], ceilingVerts[1], ceilingVerts[2], ceilingVerts[3], ceilingColor,
+                           ceilUV[0], ceilUV[1], ceilUV[2], ceilUV[3]);
 }
 
 void wolf3dInit() {
@@ -183,7 +140,7 @@ void wolf3dRender(SDL_Renderer *renderer) {
         order[i].index = i;
         order[i].depth = render3dMeshDepth(&faces[i].mesh, faces[i].position, faces[i].rotation);
     }
-    qsort(order, faceCount, sizeof(FaceDepth), compareFaceDepth);
+    qsort(order, faceCount, sizeof(FaceDepth), render3dCompareFaceDepth);
 
     for (int i = 0; i < faceCount; i++) {
         int idx = order[i].index;
