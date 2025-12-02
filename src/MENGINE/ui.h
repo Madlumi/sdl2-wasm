@@ -3,7 +3,11 @@
 #include "mutilSDL.h"
 #include <SDL.h>
 
-typedef struct _Elem{ RECT area; void (*onPress)(struct _Elem *e); void (*onUpdate)(struct _Elem *e); void (*onRender)(struct _Elem *e, SDL_Renderer *r); } Elem;
+typedef struct _Elem{ 
+   RECT area; void (*onPress)(struct _Elem *e);
+   void (*onUpdate)(struct _Elem *e); 
+   void (*onRender)(struct _Elem *e, SDL_Renderer *r); 
+} Elem;
 typedef struct { RECT area; void (*onPress)(); Elem **elems; int numElems; } UiHandler;
 
 E UiHandler *ui;
