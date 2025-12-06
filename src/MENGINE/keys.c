@@ -28,6 +28,11 @@ static char textEvents[32][SDL_TEXTINPUTEVENT_TEXT_SIZE];
 static int textEventHead = 0;
 static int textEventTail = 0;
 
+#define MAX_KEYCODES 64
+static SDL_Keycode keycodeList[MAX_KEYCODES];
+static I keycodeStates[MAX_KEYCODES];
+static I keycodeCount = 0;
+
 #define  MAX_KEYBINDS 2
 I keyBinds[INP_TOTS][MAX_KEYBINDS] = {
    [INP_W]     = { SDL_SCANCODE_W, SDL_SCANCODE_UP },
@@ -62,6 +67,25 @@ I HeldScancode(SDL_Scancode sc) {
    return KEYS[sc] > 0;
 }
 
+static I keycodeIndex(SDL_Keycode code) {
+   for (I i = 0; i < keycodeCount; ++i) {
+      if (keycodeList[i] == code) return i;
+   }
+   return -1;
+}
+
+I PressedKeycode(SDL_Keycode code) {
+   I idx = keycodeIndex(code);
+   if (idx < 0) return 0;
+   return keycodeStates[idx] == PRESS_DELAY - 1;
+}
+
+I HeldKeycode(SDL_Keycode code) {
+   I idx = keycodeIndex(code);
+   if (idx < 0) return 0;
+   return keycodeStates[idx] > 0;
+}
+
 I pollTextInput(char *buf, size_t bufSize) {
    if (!buf || bufSize == 0) return 0;
    if (textEventHead == textEventTail) return 0;
@@ -93,12 +117,14 @@ V events(D dt){
    (void)dt;
    #define sc e.key.keysym.scancode
    #define bc e.button.button
+   #define sym e.key.keysym.sym
    SDL_Event e;
    SDL_GetMouseState(&mpos.x, &mpos.y);
    for(int i = 0; i < keyt; i++){if(KEYS[i]>1){KEYS[i]--;}}
+   for(int i = 0; i < keycodeCount; ++i){ if(keycodeStates[i] > 1){ keycodeStates[i]--; } }
    while(SDL_PollEvent(&e)) {
-      if      (e.type == SDL_KEYDOWN){          if(!IN(sc,0,keyn-1 )){LOG("key: %d", sc );R;}KEYS[sc]=(KEYS[sc]>0) ?  2 : PRESS_DELAY;}
-      else if (e.type == SDL_KEYUP){            if(!IN(sc,0,keyn-1 )){LOG("key: %d", sc );R;}KEYS[sc] = 0;}
+      if      (e.type == SDL_KEYDOWN){          if(!IN(sc,0,keyn-1 )){LOG("key: %d", sc );R;}KEYS[sc]=(KEYS[sc]>0) ?  2 : PRESS_DELAY; I idx = keycodeIndex(sym); if (idx < 0 && keycodeCount < MAX_KEYCODES) { idx = keycodeCount++; keycodeList[idx] = sym; } if (idx >= 0) { keycodeStates[idx] = (keycodeStates[idx] > 0) ? 2 : PRESS_DELAY; }}
+      else if (e.type == SDL_KEYUP){            if(!IN(sc,0,keyn-1 )){LOG("key: %d", sc );R;}KEYS[sc] = 0; I idx = keycodeIndex(sym); if (idx >= 0) { keycodeStates[idx] = 0; }}
       else if (e.type == SDL_MOUSEBUTTONDOWN){  if(!IN(bc,0,mkeyn-1)){LOG("key: %d", bc );R;}KEYS[bc+keyn]=(KEYS[bc+keyn]>0) ? 2 : PRESS_DELAY;}
       else if (e.type == SDL_MOUSEBUTTONUP){    if(!IN(bc,0,mkeyn-1)){LOG("key: %d", bc );R;}KEYS[bc+keyn]=0;}
       else if (e.type == SDL_MOUSEWHEEL) {      mouseWheelMoved+=e.wheel.y ; }
@@ -112,11 +138,17 @@ V events(D dt){
 #endif
    #undef sc
    #undef bc
+   #undef sym
 }
 
 V keysInit(){
    for(I i = 0; i < keyt; i++) {
       KEYS[i] = 0;
    }
+   for(I i = 0; i < MAX_KEYCODES; ++i) {
+      keycodeStates[i] = 0;
+      keycodeList[i] = 0;
+   }
+   keycodeCount = 0;
    SDL_StartTextInput();
 }

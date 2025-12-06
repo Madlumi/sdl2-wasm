@@ -2,6 +2,7 @@
 #define MKEYHANDLER
 #include "mutilSDL.h"
 #include <SDL_scancode.h>
+#include <SDL_keycode.h>
 #include <stddef.h>
 
 E POINT mpos;
@@ -25,6 +26,8 @@ I Pressed(enum KEYMAP k);
 I Held(enum KEYMAP k);
 I PressedScancode(SDL_Scancode sc);
 I HeldScancode(SDL_Scancode sc);
+I PressedKeycode(SDL_Keycode code);
+I HeldKeycode(SDL_Keycode code);
 I pollTextInput(char *buf, size_t bufSize);
 
 E I QUIT;

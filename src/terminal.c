@@ -2,12 +2,14 @@
 
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <SDL_atomic.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdbool.h>
 
 #include "MENGINE/keys.h"
 #include "MENGINE/renderer.h"
@@ -16,11 +18,36 @@
 
 #define MAX_MESSAGES 64
 #define MAX_INPUT_LEN 512
+#define MAX_RENDER_LINES 512
+#define INPUT_MAX_LINES 64
+#define PROMPT_TEXT ">ä "
 
 typedef struct {
     char text[MAX_INPUT_LEN];
     SDL_Color color;
 } Message;
+
+typedef struct {
+    const char *text;
+    int start;
+    int len;
+    SDL_Color color;
+} LineView;
+
+typedef struct {
+    int lineStarts[INPUT_MAX_LINES];
+    int lineLengths[INPUT_MAX_LINES];
+    int lineCount;
+    int promptWidth;
+    int baseX;
+    int inputTopY;
+    int inputHeight;
+} InputLayout;
+
+typedef struct {
+    char text[MAX_INPUT_LEN];
+    SDL_Color color;
+} BackendLine;
 
 static Message history[MAX_MESSAGES];
 static int historyCount = 0;
@@ -31,6 +58,15 @@ static int selectionAnchor = -1;
 static double animTime = 0.0;
 static double caretTime = 0.0;
 static bool isSelecting = false;
+
+static InputLayout inputLayout;
+
+static SDL_Thread *backendThread = NULL;
+static SDL_atomic_t backendDone;
+static char backendResult[2048];
+static bool backendActive = false;
+static int pendingResponseIndex = -1;
+static double pendingTimer = 0.0;
 
 static const SDL_Color topBg = {12, 26, 48, 255};
 static const SDL_Color bottomBg = {8, 8, 12, 255};
@@ -90,6 +126,77 @@ static void pushMessage(const char *text, SDL_Color color) {
     strncpy(msg->text, text, MAX_INPUT_LEN - 1);
     msg->text[MAX_INPUT_LEN - 1] = '\0';
     msg->color = color;
+}
+
+static int measureWidth(const char *text) {
+    TTF_Font *font = resGetFont("default_font");
+    if (!font || !text) return 0;
+    if (text[0] == '\0') return 0;
+    int w = 0, h = 0;
+    if (TTF_SizeUTF8(font, text, &w, &h) == 0) return w;
+    return 0;
+}
+
+static int measureWidthRange(const char *text, int start, int len) {
+    if (!text || len <= 0) return 0;
+    if (len >= MAX_INPUT_LEN) len = MAX_INPUT_LEN - 1;
+    char temp[MAX_INPUT_LEN];
+    memcpy(temp, text + start, (size_t)len);
+    temp[len] = '\0';
+    return measureWidth(temp);
+}
+
+static int wrapText(const char *text, int maxWidth, int indent, int *lineStarts, int *lineLengths, int maxLines, bool allowEmpty) {
+    int len = (int)strlen(text);
+    if (maxLines <= 0) return 0;
+
+    if (len == 0) {
+        lineStarts[0] = 0;
+        lineLengths[0] = 0;
+        return allowEmpty ? 1 : 0;
+    }
+
+    int count = 0;
+    int lineStart = 0;
+    int lastBreak = -1;
+
+    for (int i = 0; i <= len; ++i) {
+        char c = (i < len) ? text[i] : '\0';
+        bool isNewline = (c == '\n' || c == '\0');
+        if (c == ' ') lastBreak = i;
+
+        if (!isNewline && c != '\0') {
+            int candidateLen = i - lineStart + 1;
+            int width = indent + measureWidthRange(text, lineStart, candidateLen);
+            if (width > maxWidth && candidateLen > 1) {
+                int wrapPos = (lastBreak >= lineStart) ? lastBreak + 1 : i;
+                int finalLen = wrapPos - lineStart;
+                if (finalLen <= 0) finalLen = candidateLen - 1;
+                if (count < maxLines) {
+                    lineStarts[count] = lineStart;
+                    lineLengths[count] = finalLen;
+                    count++;
+                }
+                lineStart = wrapPos;
+                lastBreak = -1;
+            }
+        }
+
+        if (isNewline) {
+            int finalLen = i - lineStart;
+            if (finalLen > 0 || allowEmpty) {
+                if (count < maxLines) {
+                    lineStarts[count] = lineStart;
+                    lineLengths[count] = finalLen;
+                    count++;
+                }
+            }
+            lineStart = i + 1;
+            lastBreak = -1;
+        }
+    }
+
+    return count;
 }
 
 static void removeSelection(void) {
@@ -171,34 +278,75 @@ static void pasteClipboard(void) {
     }
 }
 
-static void sendToBackend(const char *input) {
-    char promptLine[MAX_INPUT_LEN + 64];
-    snprintf(promptLine, sizeof(promptLine), "[Madi|024040]sdl2-wasm: %s", input);
-    pushMessage(promptLine, userColor);
+static void updateInputLayout(int lineHeight) {
+    inputLayout.baseX = 12;
+    inputLayout.promptWidth = measureWidth(PROMPT_TEXT);
+    int maxWidth = WINW - inputLayout.baseX * 2;
+    if (maxWidth < inputLayout.promptWidth + 16) maxWidth = inputLayout.promptWidth + 16;
 
-#ifdef __EMSCRIPTEN__
-    char response[1024];
-    snprintf(response, sizeof(response), "(local echo) gipwrap unavailable in-browser; captured: %s", input);
-    pushMessage(response, responseColor);
-#else
+    inputLayout.lineCount = wrapText(inputBuffer, maxWidth, inputLayout.promptWidth,
+                                     inputLayout.lineStarts, inputLayout.lineLengths,
+                                     INPUT_MAX_LINES, true);
+    if (inputLayout.lineCount <= 0) {
+        inputLayout.lineCount = 1;
+        inputLayout.lineStarts[0] = 0;
+        inputLayout.lineLengths[0] = 0;
+    }
+
+    inputLayout.inputHeight = inputLayout.lineCount * lineHeight;
+    inputLayout.inputTopY = WINH - 12 - inputLayout.inputHeight;
+}
+
+static int indexFromMouse(const InputLayout *layout, int mouseX, int mouseY, int lineHeight) {
+    if (mouseY < layout->inputTopY) return 0;
+    int line = (mouseY - layout->inputTopY) / lineHeight;
+    if (line < 0) line = 0;
+    if (line >= layout->lineCount) line = layout->lineCount - 1;
+
+    int start = layout->lineStarts[line];
+    int len = layout->lineLengths[line];
+    int indent = layout->promptWidth;
+    int baseX = layout->baseX + indent;
+
+    for (int i = 0; i < len; ++i) {
+        int w = measureWidthRange(inputBuffer, start, i + 1);
+        if (mouseX < baseX + w) {
+            return start + i;
+        }
+    }
+    return start + len;
+}
+
+typedef struct {
+    BackendLine lines[MAX_MESSAGES];
+    int count;
+} BackendPayload;
+
+#ifndef __EMSCRIPTEN__
+static int backendFunc(void *ptr) {
+    BackendPayload *data = (BackendPayload *)ptr;
     char tmpPath[] = "/tmp/gipwrap_convXXXXXX";
     int fd = mkstemp(tmpPath);
     if (fd == -1) {
-        pushMessage("gipwrap unavailable (tempfile)", responseColor);
-        return;
+        snprintf(backendResult, sizeof(backendResult), "gipwrap unavailable (tempfile)");
+        SDL_AtomicSet(&backendDone, 1);
+        free(data);
+        return 0;
     }
 
     FILE *tmp = fdopen(fd, "w");
     if (!tmp) {
         close(fd);
         unlink(tmpPath);
-        pushMessage("gipwrap unavailable (tempfile stream)", responseColor);
-        return;
+        snprintf(backendResult, sizeof(backendResult), "gipwrap unavailable (tempfile stream)");
+        SDL_AtomicSet(&backendDone, 1);
+        free(data);
+        return 0;
     }
 
-    for (int i = 0; i < historyCount; ++i) {
-        if (history[i].text[0] != '\0') {
-            fprintf(tmp, "%s\n", history[i].text);
+    for (int i = 0; i < data->count; ++i) {
+        if (data->lines[i].text[0] != '\0') {
+            fprintf(tmp, "%s\n", data->lines[i].text);
         }
     }
     fclose(tmp);
@@ -207,28 +355,108 @@ static void sendToBackend(const char *input) {
     snprintf(command, sizeof(command), "gipwrap -i %s", tmpPath);
 
     FILE *pipe = popen(command, "r");
-    char response[2048] = {0};
+    backendResult[0] = '\0';
     if (pipe) {
         size_t used = 0;
         char line[256];
-        while (fgets(line, sizeof(line), pipe) && used + strlen(line) + 1 < sizeof(response)) {
+        while (fgets(line, sizeof(line), pipe) && used + strlen(line) + 1 < sizeof(backendResult)) {
             size_t chunkLen = strlen(line);
-            memcpy(response + used, line, chunkLen);
+            memcpy(backendResult + used, line, chunkLen);
             used += chunkLen;
         }
-        response[used] = '\0';
+        backendResult[used] = '\0';
         pclose(pipe);
     } else {
-        snprintf(response, sizeof(response), "gipwrap not available; echoed: %s", input);
+        snprintf(backendResult, sizeof(backendResult), "gipwrap not available; echoed: %s", inputBuffer);
     }
 
     unlink(tmpPath);
-
-    if (response[0] == '\0') {
-        strcpy(response, "(no response)");
+    if (backendResult[0] == '\0') {
+        strcpy(backendResult, "(no response)");
     }
-    pushMessage(response, responseColor);
+    SDL_AtomicSet(&backendDone, 1);
+    free(data);
+    return 0;
+}
 #endif
+
+static void startBackendThread(const BackendLine *lines, int lineCount) {
+    backendActive = true;
+#ifdef __EMSCRIPTEN__
+    (void)lines; (void)lineCount;
+    snprintf(backendResult, sizeof(backendResult), "(local echo) gipwrap unavailable in-browser; captured: %s", inputBuffer);
+    SDL_AtomicSet(&backendDone, 1);
+#else
+    BackendPayload *payload = (BackendPayload *)malloc(sizeof(BackendPayload));
+    if (!payload) {
+        snprintf(backendResult, sizeof(backendResult), "gipwrap unavailable (alloc)");
+        SDL_AtomicSet(&backendDone, 1);
+        return;
+    }
+    payload->count = lineCount;
+    for (int i = 0; i < lineCount && i < MAX_MESSAGES; ++i) {
+        payload->lines[i] = lines[i];
+    }
+
+    SDL_AtomicSet(&backendDone, 0);
+
+    backendThread = SDL_CreateThread(backendFunc, "gipwrap", payload);
+    if (!backendThread) {
+        snprintf(backendResult, sizeof(backendResult), "gipwrap unavailable (thread)");
+        SDL_AtomicSet(&backendDone, 1);
+    }
+#endif
+}
+
+static void updatePendingDots(void) {
+    if (pendingResponseIndex < 0 || pendingResponseIndex >= historyCount) return;
+    int dots = ((int)(pendingTimer * 4)) % 4;
+    char waitText[8] = "";
+    for (int i = 0; i < dots; ++i) {
+        waitText[i] = '.';
+    }
+    waitText[dots] = '\0';
+    strncpy(history[pendingResponseIndex].text, waitText, MAX_INPUT_LEN - 1);
+    history[pendingResponseIndex].text[MAX_INPUT_LEN - 1] = '\0';
+}
+
+static void finalizeBackendIfReady(void) {
+    if (backendActive && SDL_AtomicGet(&backendDone)) {
+        if (pendingResponseIndex >= 0 && pendingResponseIndex < historyCount) {
+            strncpy(history[pendingResponseIndex].text, backendResult, MAX_INPUT_LEN - 1);
+            history[pendingResponseIndex].text[MAX_INPUT_LEN - 1] = '\0';
+        } else {
+            pushMessage(backendResult, responseColor);
+        }
+#ifndef __EMSCRIPTEN__
+        if (backendThread) {
+            SDL_WaitThread(backendThread, NULL);
+        }
+        backendThread = NULL;
+#endif
+        backendActive = false;
+        pendingResponseIndex = -1;
+    }
+}
+
+static void sendToBackend(const char *input) {
+    char promptLine[MAX_INPUT_LEN + 4];
+    snprintf(promptLine, sizeof(promptLine), "%s%s", PROMPT_TEXT, input);
+    pushMessage(promptLine, userColor);
+
+    pendingResponseIndex = historyCount;
+    pushMessage("...", responseColor);
+    pendingTimer = 0.0;
+
+    BackendLine copied[MAX_MESSAGES];
+    int copyCount = historyCount < MAX_MESSAGES ? historyCount : MAX_MESSAGES;
+    for (int i = 0; i < copyCount; ++i) {
+        strncpy(copied[i].text, history[i].text, MAX_INPUT_LEN - 1);
+        copied[i].text[MAX_INPUT_LEN - 1] = '\0';
+        copied[i].color = history[i].color;
+    }
+
+    startBackendThread(copied, copyCount);
 }
 
 static void commitInput(void) {
@@ -238,42 +466,21 @@ static void commitInput(void) {
     cursorIndex = 0;
     clearSelection();
     caretTime = 0.0;
+    updateInputLayout(getLineHeight());
 }
 
-static int measureWidth(const char *text) {
-    TTF_Font *font = resGetFont("default_font");
-    if (!font || !text) return 0;
-    if (text[0] == '\0') return 0;
-    int w = 0, h = 0;
-    if (TTF_SizeUTF8(font, text, &w, &h) == 0) return w;
-    return 0;
-}
+static void processInputEvents(int lineHeight) {
+    updateInputLayout(lineHeight);
 
-static int indexFromMouseX(int mouseX, int baseX, int promptWidth) {
-    int cursorX = baseX + promptWidth;
-    int len = (int)strlen(inputBuffer);
-    for (int i = 0; i < len; ++i) {
-        char temp[MAX_INPUT_LEN];
-        strncpy(temp, inputBuffer, (size_t)(i + 1));
-        temp[i + 1] = '\0';
-        int w = measureWidth(temp);
-        if (mouseX < baseX + promptWidth + w) {
-            return i;
-        }
-        cursorX = baseX + promptWidth + w;
-    }
-    (void)cursorX;
-    return len;
-}
-
-static void processInputEvents(void) {
     char incoming[SDL_TEXTINPUTEVENT_TEXT_SIZE];
     while (pollTextInput(incoming, sizeof(incoming))) {
         insertText(incoming);
+        updateInputLayout(lineHeight);
     }
 
-    bool shift = HeldScancode(SDL_SCANCODE_LSHIFT) || HeldScancode(SDL_SCANCODE_RSHIFT);
-    bool ctrl = HeldScancode(SDL_SCANCODE_LCTRL) || HeldScancode(SDL_SCANCODE_RCTRL);
+    SDL_Keymod mods = SDL_GetModState();
+    bool shift = (mods & KMOD_SHIFT) != 0;
+    bool ctrl = (mods & KMOD_CTRL) != 0;
 
     if (PressedScancode(SDL_SCANCODE_BACKSPACE) || HeldScancode(SDL_SCANCODE_BACKSPACE)) backspace();
     if (PressedScancode(SDL_SCANCODE_DELETE)   || HeldScancode(SDL_SCANCODE_DELETE))   deleteForward();
@@ -290,29 +497,24 @@ static void processInputEvents(void) {
         if (!shift) clearSelection();
     }
 
-    if (ctrl && PressedScancode(SDL_SCANCODE_A)) {
+    if (ctrl && PressedKeycode(SDLK_a)) {
         selectionAnchor = 0;
         cursorIndex = (int)strlen(inputBuffer);
     }
 
-    if (ctrl && PressedScancode(SDL_SCANCODE_C)) {
+    if (ctrl && PressedKeycode(SDLK_c)) {
         copySelection();
     }
 
-    if (ctrl && PressedScancode(SDL_SCANCODE_V)) {
+    if (ctrl && PressedKeycode(SDLK_v)) {
         pasteClipboard();
+        updateInputLayout(lineHeight);
     }
 
-    int lineHeight = getLineHeight();
-    const char *prompt = "[Madi|024040]sdl2-wasm> ";
-    int promptWidth = measureWidth(prompt);
-    int baseX = 12;
-    int inputY = WINH - lineHeight - 12;
-
-    bool mouseInInput = (mpos.y >= inputY - 4 && mpos.y <= inputY + lineHeight + 4);
+    bool mouseInInput = (mpos.y >= inputLayout.inputTopY - 4 && mpos.y <= inputLayout.inputTopY + inputLayout.inputHeight + 4);
 
     if (Pressed(INP_LCLICK) && mouseInInput) {
-        cursorIndex = indexFromMouseX(mpos.x, baseX, promptWidth);
+        cursorIndex = indexFromMouse(&inputLayout, mpos.x, mpos.y, lineHeight);
         selectionAnchor = cursorIndex;
         isSelecting = true;
         caretTime = 0.0;
@@ -324,7 +526,7 @@ static void processInputEvents(void) {
     }
 
     if (isSelecting && Held(INP_LCLICK) && mouseInInput) {
-        cursorIndex = indexFromMouseX(mpos.x, baseX, promptWidth);
+        cursorIndex = indexFromMouse(&inputLayout, mpos.x, mpos.y, lineHeight);
     }
 
     if (Pressed(INP_ENTER)) {
@@ -332,111 +534,159 @@ static void processInputEvents(void) {
     }
 }
 
-static void renderTop(SDL_Renderer *r, int midY, int lineHeight, int historyStartIndex) {
-    (void)r;
-    drawRect(0, 0, WINW, midY, ANCHOR_TOP_L, topBg);
-
-    int overflowCount = historyStartIndex;
-    int fadeLines = overflowCount < 8 ? overflowCount : 8;
-    int fadeStart = overflowCount - fadeLines;
-    for (int i = 0; i < fadeLines; ++i) {
-        Message *msg = &history[fadeStart + i];
-        if (!msg->text[0]) continue;
-        float blend = 0.5f - (0.4f * (float)i / (float)(fadeLines > 1 ? fadeLines - 1 : 1));
-        if (blend < 0.1f) blend = 0.1f;
-        Uint8 alpha = (Uint8)(blend * 255);
-        SDL_Color c = msg->color;
-        c.a = alpha;
-        drawText("default_font", 12, 12 + i * lineHeight, ANCHOR_TOP_L, c, "%s", msg->text);
+static int buildHistoryLines(LineView *out, int maxLines, int maxWidth) {
+    int outCount = 0;
+    int starts[INPUT_MAX_LINES];
+    int lens[INPUT_MAX_LINES];
+    for (int i = 0; i < historyCount && outCount < maxLines; ++i) {
+        int wrapped = wrapText(history[i].text, maxWidth, 0, starts, lens, INPUT_MAX_LINES, false);
+        for (int l = 0; l < wrapped && outCount < maxLines; ++l) {
+            if (lens[l] <= 0) continue;
+            out[outCount].text = history[i].text;
+            out[outCount].start = starts[l];
+            out[outCount].len = lens[l];
+            out[outCount].color = history[i].color;
+            outCount++;
+        }
     }
-
-    int figureY = midY / 2 + (int)(sinf((float)(animTime * 2.0)) * 10.0f);
-    int swing = (WINW / 3);
-    int figureX = (WINW / 2) + (int)(sinf((float)(animTime * 0.8)) * swing * 0.5f);
-    drawTexture("stickfigure", figureX, figureY, ANCHOR_CENTER, NULL);
+    return outCount;
 }
 
-static void renderInputLine(int baseY, int lineHeight) {
-    const char *prompt = "[Madi|024040]sdl2-wasm> ";
-    int promptWidth = measureWidth(prompt);
-    int baseX = 12;
+static void renderLine(const LineView *line, int x, int y, SDL_Color color) {
+    if (!line || line->len <= 0) return;
+    int len = line->len;
+    if (len >= MAX_INPUT_LEN) len = MAX_INPUT_LEN - 1;
+    char temp[MAX_INPUT_LEN];
+    memcpy(temp, line->text + line->start, (size_t)len);
+    temp[len] = '\0';
+    drawText("default_font", x, y, ANCHOR_TOP_L, color, "%s", temp);
+}
 
-    drawText("default_font", baseX, baseY, ANCHOR_TOP_L, promptColor, "%s", prompt);
+static void renderInputBlock(int lineHeight) {
+    int baseX = inputLayout.baseX;
+    int indent = inputLayout.promptWidth;
+
+    int cursorX = baseX + indent;
+    int cursorY = inputLayout.inputTopY;
 
     int selStart, selEnd;
     selectionRange(&selStart, &selEnd);
 
-    int leftWidth = measureWidth(inputBuffer);
-    (void)leftWidth;
-    if (hasSelection()) {
-        char left[MAX_INPUT_LEN];
-        char mid[MAX_INPUT_LEN];
-        strncpy(left, inputBuffer, (size_t)selStart);
-        left[selStart] = '\0';
-        strncpy(mid, inputBuffer + selStart, (size_t)(selEnd - selStart));
-        mid[selEnd - selStart] = '\0';
-        int highlightX = baseX + promptWidth + measureWidth(left);
-        int highlightW = measureWidth(mid);
-        drawRect(highlightX, baseY - 2, highlightW, lineHeight + 4, ANCHOR_TOP_L, selectionColor);
-    }
+    for (int i = 0; i < inputLayout.lineCount; ++i) {
+        int lineY = inputLayout.inputTopY + i * lineHeight;
+        int lineStart = inputLayout.lineStarts[i];
+        int lineLen = inputLayout.lineLengths[i];
+        int textX = baseX + indent;
 
-    if (inputBuffer[0] != '\0') {
-        drawText("default_font", baseX + promptWidth, baseY, ANCHOR_TOP_L, (SDL_Color){220, 220, 220, 255}, "%s", inputBuffer);
-    }
+        if (i == 0) {
+            drawText("default_font", baseX, lineY, ANCHOR_TOP_L, promptColor, "%s", PROMPT_TEXT);
+        }
 
-    int cursorX = baseX + promptWidth;
-    if (cursorIndex > 0) {
-        char temp[MAX_INPUT_LEN];
-        strncpy(temp, inputBuffer, (size_t)cursorIndex);
-        temp[cursorIndex] = '\0';
-        cursorX += measureWidth(temp);
+        if (hasSelection()) {
+            int overlapStart = selStart > lineStart ? selStart : lineStart;
+            int overlapEnd = selEnd < lineStart + lineLen ? selEnd : lineStart + lineLen;
+            if (overlapEnd > overlapStart) {
+                int prefixW = measureWidthRange(inputBuffer, lineStart, overlapStart - lineStart);
+                int highlightW = measureWidthRange(inputBuffer, overlapStart, overlapEnd - overlapStart);
+                int highlightX = textX + prefixW;
+                drawRect(highlightX, lineY - 2, highlightW, lineHeight + 4, ANCHOR_TOP_L, selectionColor);
+            }
+        }
+
+        if (lineLen > 0) {
+            drawText("default_font", textX, lineY, ANCHOR_TOP_L, (SDL_Color){220, 220, 220, 255}, "%.*s", lineLen, inputBuffer + lineStart);
+        }
+
+        int lineEnd = lineStart + lineLen;
+        if (cursorIndex >= lineStart && cursorIndex <= lineEnd) {
+            int prefixW = measureWidthRange(inputBuffer, lineStart, cursorIndex - lineStart);
+            cursorX = textX + prefixW;
+            cursorY = lineY;
+        }
     }
 
     if (fmod(caretTime, 1.0) < 0.6) {
-        drawRect(cursorX, baseY - 2, 2, lineHeight + 4, ANCHOR_TOP_L, cursorColor);
+        drawRect(cursorX, cursorY - 2, 2, lineHeight + 4, ANCHOR_TOP_L, cursorColor);
     }
 }
 
-static void renderBottom(SDL_Renderer *r, int midY, int lineHeight, int *outStartIndex, int *outDisplayCount) {
+static void renderBottom(SDL_Renderer *r, int midY, int lineHeight, LineView *lines, int totalLines, int *outStartIndex, int *outDisplayCount) {
     (void)r;
     drawRect(0, midY, WINW, WINH - midY, ANCHOR_TOP_L, bottomBg);
 
-    int inputY = WINH - lineHeight - 12;
-    int historyAreaHeight = inputY - midY - 8;
+    int historyAreaHeight = inputLayout.inputTopY - midY - 8;
     int maxLines = historyAreaHeight / lineHeight;
     if (maxLines < 0) maxLines = 0;
-    int displayCount = historyCount < maxLines ? historyCount : maxLines;
-    int startIndex = historyCount - displayCount;
-    int y = inputY - displayCount * lineHeight;
+    int displayCount = totalLines < maxLines ? totalLines : maxLines;
+    int startIndex = totalLines - displayCount;
+
+    int y = inputLayout.inputTopY - displayCount * lineHeight;
     if (y < midY + 8) y = midY + 8;
-    for (int i = startIndex; i < historyCount; ++i) {
-        if (!history[i].text[0]) continue;
-        drawText("default_font", 12, y, ANCHOR_TOP_L, history[i].color, "%s", history[i].text);
+    for (int i = 0; i < displayCount; ++i) {
+        renderLine(&lines[startIndex + i], 12, y, lines[startIndex + i].color);
         y += lineHeight;
     }
 
     if (outStartIndex) *outStartIndex = startIndex;
     if (outDisplayCount) *outDisplayCount = displayCount;
 
-    renderInputLine(inputY, lineHeight);
+    renderInputBlock(lineHeight);
+}
+
+static void renderTop(SDL_Renderer *r, int midY, int lineHeight, LineView *lines, int overflowCount) {
+    (void)r;
+    drawRect(0, 0, WINW, midY, ANCHOR_TOP_L, topBg);
+
+    int fadeLines = overflowCount < 12 ? overflowCount : 12;
+    int fadeStart = overflowCount - fadeLines;
+    for (int i = 0; i < fadeLines; ++i) {
+        int idx = fadeStart + (fadeLines - 1 - i);
+        float blend = 0.5f * (1.0f - ((float)i / (float)(fadeLines > 0 ? fadeLines : 1)));
+        if (blend < 0.05f) blend = 0.05f;
+        Uint8 alpha = (Uint8)(blend * 255);
+        SDL_Color c = lines[idx].color;
+        c.a = alpha;
+        int y = midY - 8 - (i + 1) * lineHeight;
+        if (y < 8) y = 8;
+        renderLine(&lines[idx], 12, y, c);
+    }
+
+    int figureY = midY / 2 + (int)(sinf((float)(animTime * 2.0)) * 10.0f);
+    int swing = (WINW / 4);
+    int figureX = (WINW / 2) + (int)(sinf((float)(animTime * 0.8)) * swing * 0.5f);
+    if (figureX < 40) figureX = 40;
+    if (figureX > WINW - 40) figureX = WINW - 40;
+    if (figureY > midY - 40) figureY = midY - 40;
+    drawTexture("stickfigure", figureX, figureY, ANCHOR_CENTER, NULL);
 }
 
 static void terminalTick(double dt) {
     animTime += dt;
     caretTime += dt;
-    processInputEvents();
+    pendingTimer += dt;
+
+    updatePendingDots();
+    finalizeBackendIfReady();
+
+    int lineHeight = getLineHeight();
+    processInputEvents(lineHeight);
 }
 
 static void terminalRender(SDL_Renderer *r) {
     (void)r;
     int lineHeight = getLineHeight();
+    updateInputLayout(lineHeight);
+
+    LineView lines[MAX_RENDER_LINES];
+    int totalLines = buildHistoryLines(lines, MAX_RENDER_LINES, WINW - 24);
     int midY = WINH / 2;
     int startIndex = 0;
-    renderBottom(r, midY, lineHeight, &startIndex, NULL);
-    renderTop(r, midY, lineHeight, startIndex);
+    renderBottom(r, midY, lineHeight, lines, totalLines, &startIndex, NULL);
+    renderTop(r, midY, lineHeight, lines, startIndex);
 }
 
 void terminalInit() {
+    SDL_AtomicSet(&backendDone, 0);
     tickF_add(terminalTick);
     renderF_add(terminalRender);
 }
