@@ -7,12 +7,14 @@
 #include "renderer.h"
 #include "res.h"
 #include "terminal.h"
+#include "config.h"
 int running=1;
 
 void quit(){ renderFree(); SDL_Quit(); running=0; }
 
 void init(){
    keysInit();
+   configInit();
    renderInit(512,512, "stick-terminal");
    terminalInit();
 }
