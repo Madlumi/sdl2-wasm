@@ -10,8 +10,22 @@ typedef struct {
     float facingX;
     float facingY;
     int exp;
-    int wood;
 } Player;
+
+typedef enum {
+    ITEM_NONE = 0,
+    ITEM_WOOD,
+} ItemType;
+
+typedef struct {
+    ItemType type;
+    int count;
+} ItemSlot;
+
+#define PLAYER_HOTBAR_SLOTS 9
+#define PLAYER_INVENTORY_COLS 9
+#define PLAYER_INVENTORY_ROWS 3
+#define PLAYER_INVENTORY_SLOTS (PLAYER_INVENTORY_COLS * PLAYER_INVENTORY_ROWS)
 
 const Player *playerGet(void);
 void playerInit(void);
@@ -21,6 +35,15 @@ void playerAddExp(int amount);
 void playerAddWood(int amount);
 int playerSpendWood(int amount);
 int playerGetWood(void);
+int playerInventorySlotCount(void);
+const ItemSlot *playerInventorySlots(void);
+const ItemSlot *playerCursorSlot(void);
+void playerInventoryClick(int slotIndex);
+int playerInventoryIsOpen(void);
+void playerToggleInventory(void);
+int playerHotbarSelection(void);
+void playerSetHotbarSelection(int index);
+void playerClearCursor(void);
 int playerCollidesAt(float left, float right, float top, float bottom,
                      const Entity *ignore);
 

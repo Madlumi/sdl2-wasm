@@ -33,7 +33,8 @@ I keyBinds[INP_TOTS][MAX_KEYBINDS] = {
    [INP_EXIT]  = { SDL_SCANCODE_ESCAPE, -1 },
    [INP_CLICK] = { SDL_BUTTON_LEFT+keyn, SDL_BUTTON_RIGHT+keyn },
    [INP_LCLICK] = { SDL_BUTTON_LEFT+keyn, SDL_SCANCODE_SPACE },
-   [INP_RCLICK] = { SDL_BUTTON_RIGHT+keyn, -1 }
+   [INP_RCLICK] = { SDL_BUTTON_RIGHT+keyn, -1 },
+   [INP_TAB]   = { SDL_SCANCODE_TAB, -1 }
 };
 
 I Pressed(enum KEYMAP k) {

@@ -3,5 +3,8 @@
 #include <SDL.h>
 
 void gameuiRender(SDL_Renderer *r);
+void gameuiTick(double dt);
+int gameuiClickConsumed(void);
+int gameuiMouseOverUI(void);
 
 #endif

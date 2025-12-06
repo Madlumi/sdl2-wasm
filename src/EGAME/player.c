@@ -2,6 +2,7 @@
 #include "enemy.h"
 #include "trees.h"
 #include "world.h"
+#include "gameui.h"
 #include "../MENGINE/keys.h"
 #include "../MENGINE/renderer.h"
 #include "../MENGINE/res.h"
@@ -30,12 +31,123 @@ static Player player;
 static Slash slash;
 static PlayerNotification notification;
 static int slashIdCounter = 0;
+static ItemSlot inventory[PLAYER_INVENTORY_SLOTS];
+static ItemSlot cursorItem;
+static int selectedHotbar = 0;
+static int inventoryOpen = 0;
 
 static float clampf(float v, float min, float max) {
     return v < min ? min : (v > max ? max : v);
 }
 
 const Player *playerGet(void) { return &player; }
+
+static int maxStackFor(ItemType type) {
+    switch (type) {
+    case ITEM_WOOD:
+        return 99;
+    default:
+        return 0;
+    }
+}
+
+static void clearSlot(ItemSlot *slot) {
+    if (!slot) return;
+    slot->type = ITEM_NONE;
+    slot->count = 0;
+}
+
+static void clearInventory(void) {
+    for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) clearSlot(&inventory[i]);
+    clearSlot(&cursorItem);
+}
+
+static int addToStack(ItemSlot *slot, ItemType type, int amount) {
+    if (!slot || amount <= 0 || type == ITEM_NONE) return amount;
+    int maxStack = maxStackFor(type);
+    if (slot->type != ITEM_NONE && slot->type != type) return amount;
+    if (maxStack <= 0) return amount;
+
+    if (slot->type == ITEM_NONE) slot->type = type;
+    int space = maxStack - slot->count;
+    if (space <= 0) return amount;
+
+    int toAdd = amount < space ? amount : space;
+    slot->count += toAdd;
+    return amount - toAdd;
+}
+
+static void restack(ItemSlot *slot) {
+    if (slot && slot->count <= 0) clearSlot(slot);
+}
+
+static int removeFromSlot(ItemSlot *slot, int amount) {
+    if (!slot || amount <= 0 || slot->type == ITEM_NONE) return 0;
+    int removed = amount < slot->count ? amount : slot->count;
+    slot->count -= removed;
+    restack(slot);
+    return removed;
+}
+
+static int addItem(ItemType type, int amount) {
+    if (type == ITEM_NONE || amount <= 0) return 0;
+
+    int remaining = amount;
+    for (int i = 0; i < PLAYER_INVENTORY_SLOTS && remaining > 0; i++) {
+        if (inventory[i].type == type) remaining = addToStack(&inventory[i], type, remaining);
+    }
+
+    for (int i = 0; i < PLAYER_INVENTORY_SLOTS && remaining > 0; i++) {
+        if (inventory[i].type == ITEM_NONE) remaining = addToStack(&inventory[i], type, remaining);
+    }
+
+    return amount - remaining;
+}
+
+static int removeItem(ItemType type, int amount, int preferred) {
+    if (amount <= 0 || type == ITEM_NONE) return 0;
+    int removed = 0;
+
+    if (preferred >= 0 && preferred < PLAYER_INVENTORY_SLOTS && inventory[preferred].type == type) {
+        removed += removeFromSlot(&inventory[preferred], amount - removed);
+    }
+
+    for (int i = 0; i < PLAYER_INVENTORY_SLOTS && removed < amount; i++) {
+        if (i == preferred) continue;
+        if (inventory[i].type == type) removed += removeFromSlot(&inventory[i], amount - removed);
+    }
+    return removed;
+}
+
+static void swapSlotWithCursor(ItemSlot *slot) {
+    if (!slot) return;
+    ItemSlot tmp = *slot;
+    *slot = cursorItem;
+    cursorItem = tmp;
+    restack(slot);
+    restack(&cursorItem);
+}
+
+static void mergeSlotWithCursor(ItemSlot *slot) {
+    if (!slot) return;
+    if (cursorItem.type == ITEM_NONE) {
+        swapSlotWithCursor(slot);
+        return;
+    }
+
+    if (slot->type == ITEM_NONE) {
+        swapSlotWithCursor(slot);
+        return;
+    }
+
+    if (slot->type == cursorItem.type) {
+        int remaining = addToStack(slot, cursorItem.type, cursorItem.count);
+        cursorItem.count = remaining;
+        restack(&cursorItem);
+    } else {
+        swapSlotWithCursor(slot);
+    }
+}
 
 static void playerNotification(const char *fmt, ...) {
     if (!fmt) return;
@@ -50,6 +162,40 @@ static void playerNotification(const char *fmt, ...) {
     vsnprintf(notification.text, sizeof(notification.text), fmt, args);
     va_end(args);
 }
+
+int playerInventorySlotCount(void) { return PLAYER_INVENTORY_SLOTS; }
+
+const ItemSlot *playerInventorySlots(void) { return inventory; }
+
+const ItemSlot *playerCursorSlot(void) { return &cursorItem; }
+
+void playerInventoryClick(int slotIndex) {
+    if (slotIndex < 0 || slotIndex >= PLAYER_INVENTORY_SLOTS) return;
+    mergeSlotWithCursor(&inventory[slotIndex]);
+}
+
+int playerInventoryIsOpen(void) { return inventoryOpen; }
+
+void playerToggleInventory(void) {
+    inventoryOpen = !inventoryOpen;
+    if (!inventoryOpen && cursorItem.type != ITEM_NONE) {
+        int added = addItem(cursorItem.type, cursorItem.count);
+        if (added >= cursorItem.count) {
+            clearSlot(&cursorItem);
+        } else {
+            cursorItem.count -= added;
+        }
+    }
+}
+
+int playerHotbarSelection(void) { return selectedHotbar; }
+
+void playerSetHotbarSelection(int index) {
+    if (index < 0 || index >= PLAYER_HOTBAR_SLOTS) return;
+    selectedHotbar = index;
+}
+
+void playerClearCursor(void) { clearSlot(&cursorItem); }
 
 static void updateCamera(void) {
     float viewW = WINW / ZOOM;
@@ -89,8 +235,8 @@ static void handleMovement(double dt) {
     }
 }
 
-static void handlePlacement(void) {
-    if (!Pressed(INP_RCLICK) || player.wood <= 0) return;
+static void handlePlacement(int uiBlocked) {
+    if (!Pressed(INP_RCLICK) || playerGetWood() <= 0 || uiBlocked) return;
 
     double wx = 0.0, wy = 0.0;
     screenToWorld(mpos.x, mpos.y, &wx, &wy);
@@ -138,7 +284,9 @@ void playerInit(void) {
     player.facingX = 0.0f;
     player.facingY = 1.0f;
     player.exp = 0;
-    player.wood = 0;
+    clearInventory();
+    selectedHotbar = 0;
+    inventoryOpen = 0;
     slash.active = 0;
     notification.active = 0;
     findSpawn();
@@ -146,8 +294,11 @@ void playerInit(void) {
 }
 
 void playerTick(double dt) {
+    if (Pressed(INP_TAB)) playerToggleInventory();
+
     handleMovement(dt);
-    handlePlacement();
+    int uiHover = gameuiMouseOverUI();
+    handlePlacement(playerInventoryIsOpen() && uiHover);
     if (slash.active) {
         slash.timer += (float)dt;
         enemyApplySlash(&slash.area, 6, slash.id);
@@ -155,7 +306,7 @@ void playerTick(double dt) {
         if (slash.timer >= slash.lifetime) slash.active = 0;
     }
 
-    if (Pressed(INP_LCLICK)) {
+    if (!gameuiClickConsumed() && !playerInventoryIsOpen() && Pressed(INP_LCLICK)) {
         float dirX = player.facingX;
         float dirY = player.facingY;
         if (dirX == 0.0f && dirY == 0.0f) dirY = 1.0f;
@@ -221,14 +372,14 @@ void playerAddExp(int amount) {
 
 void playerAddWood(int amount) {
     if (amount <= 0) return;
-    player.wood += amount;
-    playerNotification("+%d wood", amount);
+    int added = addItem(ITEM_WOOD, amount);
+    if (added > 0) playerNotification("+%d wood", added);
 }
 
 int playerSpendWood(int amount) {
-    if (amount <= 0 || player.wood < amount) return 0;
-    player.wood -= amount;
-    return 1;
+    if (amount <= 0 || playerGetWood() < amount) return 0;
+    int removed = removeItem(ITEM_WOOD, amount, selectedHotbar);
+    return removed >= amount;
 }
 
 int playerCollidesAt(float left, float right, float top, float bottom,
@@ -243,4 +394,10 @@ int playerCollidesAt(float left, float right, float top, float bottom,
     return left < pRight && right > pLeft && top < pBottom && bottom > pTop;
 }
 
-int playerGetWood(void) { return player.wood; }
+int playerGetWood(void) {
+    int total = 0;
+    for (int i = 0; i < PLAYER_INVENTORY_SLOTS; i++) {
+        if (inventory[i].type == ITEM_WOOD) total += inventory[i].count;
+    }
+    return total;
+}

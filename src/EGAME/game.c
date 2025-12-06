@@ -48,6 +48,7 @@ void gameInit() {
     playerInit();
     npcInit();
     enemyInit();
+    tickF_add(gameuiTick);
     tickF_add(gameTick);
     renderF_add(gameRender);
 }

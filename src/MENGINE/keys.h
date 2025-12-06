@@ -13,6 +13,7 @@ enum KEYMAP{
     INP_CLICK,
     INP_LCLICK,
     INP_RCLICK,
+    INP_TAB,
     INP_TOTS
 };
 
