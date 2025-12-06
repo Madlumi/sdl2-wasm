@@ -4,7 +4,10 @@
 #include <SDL_ttf.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "MENGINE/keys.h"
 #include "MENGINE/renderer.h"
@@ -27,6 +30,7 @@ static int cursorIndex = 0;
 static int selectionAnchor = -1;
 static double animTime = 0.0;
 static double caretTime = 0.0;
+static bool isSelecting = false;
 
 static const SDL_Color topBg = {12, 26, 48, 255};
 static const SDL_Color bottomBg = {8, 8, 12, 255};
@@ -35,6 +39,16 @@ static const SDL_Color userColor = {180, 230, 255, 255};
 static const SDL_Color responseColor = {255, 207, 150, 255};
 static const SDL_Color cursorColor = {255, 255, 255, 255};
 static const SDL_Color selectionColor = {70, 120, 180, 180};
+
+static int getLineHeight(void) {
+    TTF_Font *font = resGetFont("default_font");
+    int lineHeight = 16;
+    if (font) {
+        lineHeight = TTF_FontLineSkip(font);
+        if (lineHeight <= 0) lineHeight = 16;
+    }
+    return lineHeight;
+}
 
 static int clampIndex(int value, int min, int max) {
     if (value < min) return min;
@@ -66,7 +80,7 @@ static void clearSelection(void) {
 }
 
 static void pushMessage(const char *text, SDL_Color color) {
-    if (!text) return;
+    if (!text || text[0] == '\0') return;
     if (historyCount < MAX_MESSAGES) {
         historyCount++;
     } else {
@@ -162,11 +176,38 @@ static void sendToBackend(const char *input) {
     snprintf(promptLine, sizeof(promptLine), "[Madi|024040]sdl2-wasm: %s", input);
     pushMessage(promptLine, userColor);
 
-    char response[1024] = {0};
 #ifdef __EMSCRIPTEN__
+    char response[1024];
     snprintf(response, sizeof(response), "(local echo) gipwrap unavailable in-browser; captured: %s", input);
+    pushMessage(response, responseColor);
 #else
-    FILE *pipe = popen("gipwrap -h 2>&1", "r");
+    char tmpPath[] = "/tmp/gipwrap_convXXXXXX";
+    int fd = mkstemp(tmpPath);
+    if (fd == -1) {
+        pushMessage("gipwrap unavailable (tempfile)", responseColor);
+        return;
+    }
+
+    FILE *tmp = fdopen(fd, "w");
+    if (!tmp) {
+        close(fd);
+        unlink(tmpPath);
+        pushMessage("gipwrap unavailable (tempfile stream)", responseColor);
+        return;
+    }
+
+    for (int i = 0; i < historyCount; ++i) {
+        if (history[i].text[0] != '\0') {
+            fprintf(tmp, "%s\n", history[i].text);
+        }
+    }
+    fclose(tmp);
+
+    char command[256];
+    snprintf(command, sizeof(command), "gipwrap -i %s", tmpPath);
+
+    FILE *pipe = popen(command, "r");
+    char response[2048] = {0};
     if (pipe) {
         size_t used = 0;
         char line[256];
@@ -180,8 +221,14 @@ static void sendToBackend(const char *input) {
     } else {
         snprintf(response, sizeof(response), "gipwrap not available; echoed: %s", input);
     }
-#endif
+
+    unlink(tmpPath);
+
+    if (response[0] == '\0') {
+        strcpy(response, "(no response)");
+    }
     pushMessage(response, responseColor);
+#endif
 }
 
 static void commitInput(void) {
@@ -196,9 +243,27 @@ static void commitInput(void) {
 static int measureWidth(const char *text) {
     TTF_Font *font = resGetFont("default_font");
     if (!font || !text) return 0;
+    if (text[0] == '\0') return 0;
     int w = 0, h = 0;
     if (TTF_SizeUTF8(font, text, &w, &h) == 0) return w;
     return 0;
+}
+
+static int indexFromMouseX(int mouseX, int baseX, int promptWidth) {
+    int cursorX = baseX + promptWidth;
+    int len = (int)strlen(inputBuffer);
+    for (int i = 0; i < len; ++i) {
+        char temp[MAX_INPUT_LEN];
+        strncpy(temp, inputBuffer, (size_t)(i + 1));
+        temp[i + 1] = '\0';
+        int w = measureWidth(temp);
+        if (mouseX < baseX + promptWidth + w) {
+            return i;
+        }
+        cursorX = baseX + promptWidth + w;
+    }
+    (void)cursorX;
+    return len;
 }
 
 static void processInputEvents(void) {
@@ -238,18 +303,45 @@ static void processInputEvents(void) {
         pasteClipboard();
     }
 
+    int lineHeight = getLineHeight();
+    const char *prompt = "[Madi|024040]sdl2-wasm> ";
+    int promptWidth = measureWidth(prompt);
+    int baseX = 12;
+    int inputY = WINH - lineHeight - 12;
+
+    bool mouseInInput = (mpos.y >= inputY - 4 && mpos.y <= inputY + lineHeight + 4);
+
+    if (Pressed(INP_LCLICK) && mouseInInput) {
+        cursorIndex = indexFromMouseX(mpos.x, baseX, promptWidth);
+        selectionAnchor = cursorIndex;
+        isSelecting = true;
+        caretTime = 0.0;
+    } else if (!Held(INP_LCLICK)) {
+        if (isSelecting && selectionAnchor == cursorIndex) {
+            clearSelection();
+        }
+        isSelecting = false;
+    }
+
+    if (isSelecting && Held(INP_LCLICK) && mouseInInput) {
+        cursorIndex = indexFromMouseX(mpos.x, baseX, promptWidth);
+    }
+
     if (Pressed(INP_ENTER)) {
         commitInput();
     }
 }
 
-static void renderTop(SDL_Renderer *r, int midY, int lineHeight) {
+static void renderTop(SDL_Renderer *r, int midY, int lineHeight, int historyStartIndex) {
     (void)r;
     drawRect(0, 0, WINW, midY, ANCHOR_TOP_L, topBg);
 
-    int fadeLines = historyCount < 8 ? historyCount : 8;
+    int overflowCount = historyStartIndex;
+    int fadeLines = overflowCount < 8 ? overflowCount : 8;
+    int fadeStart = overflowCount - fadeLines;
     for (int i = 0; i < fadeLines; ++i) {
-        Message *msg = &history[historyCount - fadeLines + i];
+        Message *msg = &history[fadeStart + i];
+        if (!msg->text[0]) continue;
         float blend = 0.5f - (0.4f * (float)i / (float)(fadeLines > 1 ? fadeLines - 1 : 1));
         if (blend < 0.1f) blend = 0.1f;
         Uint8 alpha = (Uint8)(blend * 255);
@@ -288,7 +380,9 @@ static void renderInputLine(int baseY, int lineHeight) {
         drawRect(highlightX, baseY - 2, highlightW, lineHeight + 4, ANCHOR_TOP_L, selectionColor);
     }
 
-    drawText("default_font", baseX + promptWidth, baseY, ANCHOR_TOP_L, (SDL_Color){220, 220, 220, 255}, "%s", inputBuffer);
+    if (inputBuffer[0] != '\0') {
+        drawText("default_font", baseX + promptWidth, baseY, ANCHOR_TOP_L, (SDL_Color){220, 220, 220, 255}, "%s", inputBuffer);
+    }
 
     int cursorX = baseX + promptWidth;
     if (cursorIndex > 0) {
@@ -303,7 +397,7 @@ static void renderInputLine(int baseY, int lineHeight) {
     }
 }
 
-static void renderBottom(SDL_Renderer *r, int midY, int lineHeight) {
+static void renderBottom(SDL_Renderer *r, int midY, int lineHeight, int *outStartIndex, int *outDisplayCount) {
     (void)r;
     drawRect(0, midY, WINW, WINH - midY, ANCHOR_TOP_L, bottomBg);
 
@@ -311,13 +405,18 @@ static void renderBottom(SDL_Renderer *r, int midY, int lineHeight) {
     int historyAreaHeight = inputY - midY - 8;
     int maxLines = historyAreaHeight / lineHeight;
     if (maxLines < 0) maxLines = 0;
-    int startIndex = historyCount - maxLines;
-    if (startIndex < 0) startIndex = 0;
-    int y = midY + 8;
+    int displayCount = historyCount < maxLines ? historyCount : maxLines;
+    int startIndex = historyCount - displayCount;
+    int y = inputY - displayCount * lineHeight;
+    if (y < midY + 8) y = midY + 8;
     for (int i = startIndex; i < historyCount; ++i) {
+        if (!history[i].text[0]) continue;
         drawText("default_font", 12, y, ANCHOR_TOP_L, history[i].color, "%s", history[i].text);
         y += lineHeight;
     }
+
+    if (outStartIndex) *outStartIndex = startIndex;
+    if (outDisplayCount) *outDisplayCount = displayCount;
 
     renderInputLine(inputY, lineHeight);
 }
@@ -330,14 +429,11 @@ static void terminalTick(double dt) {
 
 static void terminalRender(SDL_Renderer *r) {
     (void)r;
-    TTF_Font *font = resGetFont("default_font");
-    int lineHeight = 16;
-    if (font) {
-        lineHeight = TTF_FontLineSkip(font);
-    }
+    int lineHeight = getLineHeight();
     int midY = WINH / 2;
-    renderTop(r, midY, lineHeight);
-    renderBottom(r, midY, lineHeight);
+    int startIndex = 0;
+    renderBottom(r, midY, lineHeight, &startIndex, NULL);
+    renderTop(r, midY, lineHeight, startIndex);
 }
 
 void terminalInit() {
