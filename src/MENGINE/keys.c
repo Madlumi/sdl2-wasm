@@ -21,6 +21,7 @@ I KEYS[keyt];
 SDL_Point mpos = {0,0};
 I QUIT=0;
 I mouseWheelMoved=0;
+static SDLEventListener eventListener = NULL;
 
 
 #define  MAX_KEYBINDS 2
@@ -46,6 +47,10 @@ I Held(enum KEYMAP k) {
    return 0;
 }
 
+void setEventListener(SDLEventListener listener) {
+   eventListener = listener;
+}
+
 void RemapKey(enum KEYMAP k, int newKey, int bindIndex) {
    if (bindIndex < MAX_KEYBINDS) {
       keyBinds[k][bindIndex] = newKey;
@@ -62,6 +67,7 @@ V events(D dt){
    SDL_GetMouseState(&mpos.x, &mpos.y);
    for(int i = 0; i < keyt; i++){if(KEYS[i]>1){KEYS[i]--;}}
    while(SDL_PollEvent(&e)) {
+      if (eventListener) { eventListener(&e); }
       if      (e.type == SDL_KEYDOWN){          if(!IN(sc,0,keyn-1 )){LOG("key: %d", sc );R;}KEYS[sc]=(KEYS[sc]>0) ?  2 : PRESS_DELAY;}
       else if (e.type == SDL_KEYUP){            if(!IN(sc,0,keyn-1 )){LOG("key: %d", sc );R;}KEYS[sc] = 0;}
       else if (e.type == SDL_MOUSEBUTTONDOWN){  if(!IN(bc,0,mkeyn-1)){LOG("key: %d", bc );R;}KEYS[bc+keyn]=(KEYS[bc+keyn]>0) ?  2 : PRESS_DELAY;}
