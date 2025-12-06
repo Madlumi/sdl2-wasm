@@ -1,6 +1,9 @@
 #ifndef MKEYHANDLER
 #define MKEYHANDLER
 #include "mutilSDL.h"
+#include <SDL.h>
+
+typedef void (*SDLEventListener)(SDL_Event *e);
 
 E POINT mpos;
 enum KEYMAP{
@@ -24,6 +27,7 @@ I Held(enum KEYMAP k);
 
 E I QUIT;
 E I mouseWheelMoved;
+V setEventListener(SDLEventListener listener);
 V events(D dt);
 V keysInit();
 #endif
