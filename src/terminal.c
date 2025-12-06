@@ -155,6 +155,14 @@ static void clearSelection(void) {
     selectionAnchor = -1;
 }
 
+static void setClipboards(const char *text) {
+    if (!text) return;
+    SDL_SetClipboardText(text);
+#if SDL_VERSION_ATLEAST(2, 26, 0)
+    SDL_SetPrimarySelectionText(text);
+#endif
+}
+
 static void pushMessage(const char *text, SDL_Color color) {
     if (!text || text[0] == '\0') return;
     if (historyCount < MAX_MESSAGES) {
@@ -307,11 +315,19 @@ static void copySelection(void) {
     if (len >= MAX_INPUT_LEN) len = MAX_INPUT_LEN - 1;
     memcpy(tmp, inputBuffer + start, (size_t)len);
     tmp[len] = '\0';
-    SDL_SetClipboardText(tmp);
+    setClipboards(tmp);
 }
 
 static void pasteClipboard(void) {
-    char *clip = SDL_GetClipboardText();
+    char *clip = NULL;
+#if SDL_VERSION_ATLEAST(2, 26, 0)
+    if (SDL_HasPrimarySelectionText()) {
+        clip = SDL_GetPrimarySelectionText();
+    }
+#endif
+    if (!clip) {
+        clip = SDL_GetClipboardText();
+    }
     if (clip) {
         insertText(clip);
         SDL_free(clip);
@@ -428,6 +444,9 @@ static int historyColumnFromMouse(const PositionedLine *line, int mouseX) {
 
 static HistoryCursor historyCursorFromMouse(int mouseX, int mouseY) {
     HistoryCursor cur = historyCursor;
+    if (cachedLineHeight <= 0) {
+        cachedLineHeight = getLineHeight();
+    }
     for (int i = 0; i < positionedCount; ++i) {
         PositionedLine *line = &positionedLines[i];
         if (!line->visible) continue;
@@ -463,7 +482,7 @@ static void copyHistorySelection(void) {
     buffer[written] = '\0';
     strncpy(historyYankBuffer, buffer, sizeof(historyYankBuffer) - 1);
     historyYankBuffer[sizeof(historyYankBuffer) - 1] = '\0';
-    SDL_SetClipboardText(buffer);
+    setClipboards(buffer);
 }
 
 static void yankHistoryLine(int lineIndex) {
@@ -473,7 +492,7 @@ static void yankHistoryLine(int lineIndex) {
     if (len >= (int)sizeof(historyYankBuffer)) len = sizeof(historyYankBuffer) - 1;
     memcpy(historyYankBuffer, historyLines[lineIndex].text + historyLines[lineIndex].start, (size_t)len);
     historyYankBuffer[len] = '\0';
-    SDL_SetClipboardText(historyYankBuffer);
+    setClipboards(historyYankBuffer);
 }
 
 static void pasteHistoryYank(void) {
@@ -1014,9 +1033,8 @@ static void renderModeIndicator(int lineHeight) {
     const char *modeLabel = "NORMAL";
     if (editorMode == MODE_INSERT) modeLabel = "INSERT";
     else if (editorMode == MODE_VISUAL) modeLabel = "VISUAL";
-    int labelY = inputLayout.inputTopY - lineHeight - 6;
-    if (labelY < midSplitY + 4) labelY = midSplitY + 4;
-    drawText("default_font", WINW - 12, labelY, ANCHOR_TOP_R, gConfig.promptColor, "[%s]", modeLabel);
+    int labelY = WINH - 10;
+    drawText("default_font", WINW - 12, labelY, ANCHOR_BOT_R, gConfig.promptColor, "[%s]", modeLabel);
 }
 
 static void renderTopBackground(SDL_Renderer *r, int midY) {
@@ -1040,15 +1058,20 @@ static void renderStickFigure(int midY) {
     if (tex) {
         SDL_QueryTexture(tex, NULL, NULL, &figW, &figH);
     }
-    int figureTop = figH / 2 + 8;
-    int figureBottom = midY - figH / 2 - 8;
-    if (figureBottom < figureTop) figureBottom = figureTop + 4;
+    int panePadding = 12;
+    int laneTop = panePadding + figH / 2;
+    int laneBottom = midY - panePadding - figH / 2;
+    if (laneBottom < laneTop) laneBottom = laneTop + 4;
 
-    int figureY = figureTop + (figureBottom - figureTop) / 2 + (int)(sinf((float)(animTime * 2.0)) * 10.0f);
-    int swing = (WINW / 3);
-    int figureX = (WINW / 2) + (int)(sinf((float)(animTime * 0.8f)) * swing * 0.5f);
-    figureX = clampIndex(figureX, figW / 2 + 8, WINW - figW / 2 - 8);
-    figureY = clampIndex(figureY, figureTop, figureBottom);
+    int walkCenterY = laneBottom - figH / 4;
+    int bobRange = (laneBottom - laneTop) / 6;
+    if (bobRange < 4) bobRange = 4;
+    int figureY = walkCenterY - (int)(cosf((float)(animTime * 2.2f)) * bobRange);
+
+    int swing = WINW / 3;
+    int figureX = (WINW / 2) + (int)(sinf((float)(animTime * 0.9f)) * swing * 0.5f);
+    figureX = clampIndex(figureX, figW / 2 + panePadding, WINW - figW / 2 - panePadding);
+    figureY = clampIndex(figureY, laneTop, laneBottom);
     drawTexture("stickfigure", figureX, figureY, ANCHOR_CENTER, NULL);
 }
 
