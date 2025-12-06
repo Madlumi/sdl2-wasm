@@ -12,37 +12,47 @@
 #include "../MENGINE/res.h"
 
 #define MAX_INPUT_LEN 512
-#define MAX_HISTORY_LINES 200
-#define MAX_FADING_LINES 16
+#define MAX_HISTORY_LINES 400
+#define SCROLL_LINES_PER_TICK 3
 
 typedef struct {
     char text[MAX_INPUT_LEN];
-    double timestamp;
 } Line;
+
+typedef enum {
+    MODE_INSERT,
+    MODE_NORMAL,
+} InputMode;
 
 static Line history[MAX_HISTORY_LINES];
 static int historyCount = 0;
 static int historyIndex = -1; // -1 means live input
 static char draftBuffer[MAX_INPUT_LEN] = "";
+static int selectedHistoryIndex = -1;
 
-static Line fadingLines[MAX_FADING_LINES];
-static int fadingCount = 0;
+static int scrollOffset = 0; // number of lines above the latest entry
+static bool manualScroll = false;
+
+static InputMode inputMode = MODE_INSERT;
+static char yankBuffer[MAX_INPUT_LEN] = "";
 
 static char inputBuffer[MAX_INPUT_LEN] = "";
 static int cursorPos = 0;
 static int selectionStart = -1;
 static int selectionEnd = -1;
 
-static double appTime = 0.0;
 static double cursorBlink = 0.0;
 
 static float figureX = 40.0f;
 static int figureDir = 1;
 
-static const double fadeDuration = 7.5;
-
 static TTF_Font *getFont(void) {
     return resGetFont("default_font");
+}
+
+static int getLineHeight(void) {
+    TTF_Font *font = getFont();
+    return font ? TTF_FontHeight(font) + 2 : 18;
 }
 
 static int clampInt(int v, int min, int max) {
@@ -189,17 +199,6 @@ static void selectAll(void) {
     cursorPos = selectionEnd;
 }
 
-static void pushFadingLine(const char *text) {
-    if (!text) return;
-    if (fadingCount == MAX_FADING_LINES) {
-        memmove(fadingLines, fadingLines + 1, sizeof(Line) * (MAX_FADING_LINES - 1));
-        fadingCount--;
-    }
-    Line *line = &fadingLines[fadingCount++];
-    snprintf(line->text, sizeof(line->text), "%s", text);
-    line->timestamp = appTime;
-}
-
 static void pushHistory(const char *text) {
     if (historyCount == MAX_HISTORY_LINES) {
         memmove(history, history + 1, sizeof(Line) * (MAX_HISTORY_LINES - 1));
@@ -207,8 +206,10 @@ static void pushHistory(const char *text) {
     }
     Line *line = &history[historyCount++];
     snprintf(line->text, sizeof(line->text), "%s", text);
-    line->timestamp = appTime;
-    pushFadingLine(text);
+
+    if (!manualScroll) {
+        scrollOffset = 0;
+    }
 }
 
 static void submitLine(void) {
@@ -245,9 +246,73 @@ static void navigateHistory(int direction) {
     }
 }
 
+static void enterInsertMode(void) {
+    inputMode = MODE_INSERT;
+    SDL_StartTextInput();
+}
+
+static void enterNormalMode(void) {
+    inputMode = MODE_NORMAL;
+    SDL_StopTextInput();
+    clearSelection();
+}
+
+static void yankLine(const char *text) {
+    if (!text) return;
+    snprintf(yankBuffer, sizeof(yankBuffer), "%s", text);
+    SDL_SetClipboardText(yankBuffer);
+}
+
+static void pasteYank(void) {
+    insertText(yankBuffer);
+}
+
+static void handleNormalMode(SDL_Keysym keysym) {
+    switch (keysym.sym) {
+        case SDLK_i:
+        case SDLK_a:
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            enterInsertMode();
+            break;
+        case SDLK_h:
+            moveCursorTo(cursorPos - 1, false);
+            break;
+        case SDLK_l:
+            moveCursorTo(cursorPos + 1, false);
+            break;
+        case SDLK_0:
+            moveCursorTo(0, false);
+            break;
+        case SDLK_d:
+        case SDLK_x:
+            deleteForward();
+            break;
+        case SDLK_j:
+            navigateHistory(-1);
+            break;
+        case SDLK_k:
+            navigateHistory(1);
+            break;
+        case SDLK_y:
+            yankLine(inputBuffer);
+            break;
+        case SDLK_p:
+            pasteYank();
+            break;
+        default:
+            break;
+    }
+}
+
 static void handleKeyDown(SDL_Keysym keysym) {
     bool shift = (keysym.mod & KMOD_SHIFT) != 0;
     bool ctrl = (keysym.mod & KMOD_CTRL) != 0;
+
+    if (inputMode == MODE_NORMAL && !ctrl) {
+        handleNormalMode(keysym);
+        return;
+    }
 
     switch (keysym.sym) {
         case SDLK_RETURN:
@@ -290,26 +355,11 @@ static void handleKeyDown(SDL_Keysym keysym) {
         case SDLK_a:
             if (ctrl) selectAll();
             break;
+        case SDLK_ESCAPE:
+            enterNormalMode();
+            break;
         default:
             break;
-    }
-}
-
-static void pruneFadedLines(void) {
-    int firstVisible = 0;
-    for (int i = 0; i < fadingCount; i++) {
-        double age = appTime - fadingLines[i].timestamp;
-        if (age < fadeDuration) {
-            firstVisible = i;
-            break;
-        }
-        firstVisible = i + 1;
-    }
-    if (firstVisible > 0 && firstVisible < fadingCount) {
-        memmove(fadingLines, fadingLines + firstVisible, sizeof(Line) * (fadingCount - firstVisible));
-        fadingCount -= firstVisible;
-    } else if (firstVisible >= fadingCount) {
-        fadingCount = 0;
     }
 }
 
@@ -317,66 +367,103 @@ static void terminalHandleEvent(SDL_Event *e) {
     if (!e) return;
     switch (e->type) {
         case SDL_TEXTINPUT:
-            insertText(e->text.text);
+            if (inputMode == MODE_INSERT) {
+                insertText(e->text.text);
+            }
             break;
         case SDL_KEYDOWN:
             handleKeyDown(e->key.keysym);
             break;
+        case SDL_MOUSEWHEEL: {
+            int lineHeight = getLineHeight();
+            int topHeight = WINH / 2;
+            (void)topHeight;
+            int inputTop = WINH - lineHeight - 12;
+            int textAreaTop = 12;
+            int textAreaBottom = inputTop - 12;
+            int visible = (textAreaBottom - textAreaTop) / lineHeight;
+            int maxScroll = historyCount > visible ? historyCount - visible : 0;
+            scrollOffset = clampInt(scrollOffset + (e->wheel.y < 0 ? -SCROLL_LINES_PER_TICK : SCROLL_LINES_PER_TICK), 0, maxScroll);
+            manualScroll = scrollOffset > 0;
+            break;
+        }
+        case SDL_MOUSEBUTTONDOWN: {
+            int lineHeight = getLineHeight();
+            int inputTop = WINH - lineHeight - 12;
+            int textAreaTop = 12;
+            int textAreaBottom = inputTop - 12;
+            if (e->button.y >= textAreaTop && e->button.y <= textAreaBottom) {
+                int offsetFromBottom = (textAreaBottom - e->button.y) / lineHeight;
+                int index = historyCount - 1 - scrollOffset - offsetFromBottom;
+                if (index >= 0 && index < historyCount) {
+                    setFromHistory(index);
+                    selectedHistoryIndex = index;
+                    historyIndex = -1;
+                    manualScroll = true;
+                }
+            }
+            break;
+        }
         default:
             break;
     }
 }
 
 static void drawStickFigure(int topHeight) {
-    SDL_Color lineColor = {230, 240, 255, 255};
-    float baseY = topHeight - 70.0f;
-
-    float headSize = 12.0f;
-    float bodyHeight = 28.0f;
-    float legLength = 18.0f;
-    float armLength = 14.0f;
-
-    int headX = (int)figureX;
-    int headY = (int)(baseY - bodyHeight - headSize);
-    drawRect(headX - (int)(headSize / 2), headY, (int)headSize, (int)headSize, ANCHOR_TOP_L, (SDL_Color){200, 220, 255, 200});
-
-    int bodyTopY = (int)(baseY - bodyHeight);
-    drawLine(headX, headY + (int)headSize, headX, bodyTopY, lineColor);
-
-    drawLine(headX, bodyTopY + 4, headX - (int)armLength, bodyTopY + 10, lineColor);
-    drawLine(headX, bodyTopY + 4, headX + (int)armLength, bodyTopY + 10, lineColor);
-
-    drawLine(headX, bodyTopY + (int)bodyHeight, headX - (int)armLength, bodyTopY + (int)bodyHeight + (int)legLength, lineColor);
-    drawLine(headX, bodyTopY + (int)bodyHeight, headX + (int)armLength, bodyTopY + (int)bodyHeight + (int)legLength, lineColor);
+    int y = topHeight / 2 - 50;
+    drawTexture("stickfigure", (int)figureX, y, ANCHOR_TOP_L, NULL);
 }
 
-static void drawFadingLines(int topHeight, int lineHeight) {
+static void drawHistory(int inputTop, int lineHeight) {
     int margin = 12;
-    for (int i = 0; i < fadingCount; i++) {
-        double age = appTime - fadingLines[i].timestamp;
-        double alpha = 1.0 - (age / fadeDuration);
-        if (alpha <= 0.0) continue;
-        if (alpha > 1.0) alpha = 1.0;
-        Uint8 a = (Uint8)(alpha * 255);
-        int y = topHeight - margin - lineHeight * (fadingCount - i);
-        drawText("default_font", margin, y, ANCHOR_TOP_L, (SDL_Color){200, 220, 255, a}, "%s", fadingLines[i].text);
-    }
-}
-
-static void drawHistory(int bottomStart, int inputTop, int lineHeight) {
-    int margin = 12;
-    int available = inputTop - bottomStart - margin;
+    int textAreaTop = margin;
+    int textAreaBottom = inputTop - margin;
+    int available = textAreaBottom - textAreaTop;
     int maxLines = available / lineHeight;
     if (maxLines <= 0) return;
 
-    int start = historyCount - maxLines;
-    if (start < 0) start = 0;
-    int y = bottomStart + margin;
-    for (int i = start; i < historyCount; i++) {
-        SDL_Color c = {170, 190, 210, 255};
-        drawText("default_font", margin, y, ANCHOR_TOP_L, c, "%s", history[i].text);
-        y += lineHeight;
+    int y = textAreaBottom - lineHeight;
+    for (int i = 0; i < maxLines; i++) {
+        int index = historyCount - 1 - scrollOffset - i;
+        if (index < 0) break;
+
+        float pos01 = (float)(y - textAreaTop) / (float)(textAreaBottom - textAreaTop);
+        if (pos01 < 0.0f) pos01 = 0.0f;
+        if (pos01 > 1.0f) pos01 = 1.0f;
+        Uint8 alpha = (Uint8)(80 + 175 * pos01);
+
+        bool selected = (index == selectedHistoryIndex);
+        if (selected) {
+            drawRect(margin - 6, y - 2, WINW - margin * 2, lineHeight + 4, ANCHOR_TOP_L, (SDL_Color){60, 90, 140, 140});
+        }
+
+        drawText("default_font", margin, y, ANCHOR_TOP_L, (SDL_Color){190, 210, 230, alpha}, "%s", history[index].text);
+        y -= lineHeight;
     }
+}
+
+static void drawScrollBar(int bottomStart, int inputTop, int lineHeight) {
+    int trackWidth = 10;
+    int margin = 8;
+    int trackX = WINW - trackWidth - margin;
+    int trackY = bottomStart + margin;
+    int trackHeight = inputTop - bottomStart - margin * 2;
+    if (trackHeight <= 0) return;
+
+    drawRect(trackX, trackY, trackWidth, trackHeight, ANCHOR_TOP_L, (SDL_Color){20, 30, 45, 200});
+
+    int visible = (inputTop - margin - (bottomStart + margin)) / lineHeight;
+    int maxScroll = historyCount > visible ? historyCount - visible : 0;
+    if (maxScroll <= 0) {
+        drawRect(trackX + 2, trackY + 2, trackWidth - 4, trackHeight - 4, ANCHOR_TOP_L, (SDL_Color){90, 130, 200, 220});
+        return;
+    }
+
+    float thumbRatio = (float)visible / (float)(historyCount);
+    if (thumbRatio < 0.1f) thumbRatio = 0.1f;
+    int thumbHeight = (int)(trackHeight * thumbRatio);
+    int thumbY = trackY + (int)((float)scrollOffset / (float)maxScroll * (float)(trackHeight - thumbHeight));
+    drawRect(trackX + 2, thumbY, trackWidth - 4, thumbHeight, ANCHOR_TOP_L, (SDL_Color){110, 160, 240, 230});
 }
 
 static void drawInputBar(int inputTop, int lineHeight) {
@@ -404,8 +491,14 @@ static void drawInputBar(int inputTop, int lineHeight) {
 
     drawText("default_font", baseX, baseY, ANCHOR_TOP_L, textColor, "> %s", inputBuffer);
 
+    SDL_Color modeColor = inputMode == MODE_INSERT ? (SDL_Color){140, 200, 140, 220} : (SDL_Color){220, 170, 120, 220};
+    const char *modeText = inputMode == MODE_INSERT ? "INSERT" : "NORMAL (vim)";
+    int modeWidth = measureTextWidth(modeText, -1);
+    drawRect(WINW - modeWidth - margin * 2, baseY - 2, modeWidth + margin, lineHeight + 4, ANCHOR_TOP_L, (SDL_Color){20, 30, 45, 200});
+    drawText("default_font", WINW - modeWidth - margin, baseY, ANCHOR_TOP_L, modeColor, "%s", modeText);
+
     bool showCursor = fmod(cursorBlink, 1.0) < 0.5;
-    if (showCursor) {
+    if (showCursor && inputMode == MODE_INSERT) {
         int cursorX = baseX + promptWidth + measureTextWidth(inputBuffer, cursorPos);
         drawLine(cursorX, baseY, cursorX, baseY + lineHeight, cursorColor);
     }
@@ -413,16 +506,17 @@ static void drawInputBar(int inputTop, int lineHeight) {
 
 void terminalInit(void) {
     SDL_StartTextInput();
+    inputMode = MODE_INSERT;
     setEventListener(terminalHandleEvent);
     pushHistory("Welcome to the split-screen terminal.");
     pushHistory("Type to chat below. Press Enter to send.");
     pushHistory("Use Ctrl+C/V/X, Shift+Arrows, and history keys.");
+    pushHistory("Press Esc for vim-like NORMAL mode, i to return to INSERT.");
+    pushHistory("Click history to re-use a line. Scroll with mouse wheel.");
 }
 
 void terminalTick(D dt) {
-    appTime += dt;
     cursorBlink += dt;
-    pruneFadedLines();
 
     int topHeight = WINH / 2;
     float margin = 20.0f;
@@ -438,15 +532,15 @@ void terminalRender(SDL_Renderer *r) {
     (void)r;
     int topHeight = WINH / 2;
     int bottomStart = topHeight;
-    int lineHeight = getFont() ? TTF_FontHeight(getFont()) + 2 : 18;
+    int lineHeight = getLineHeight();
 
     drawRect(0, 0, WINW, topHeight, ANCHOR_TOP_L, (SDL_Color){8, 18, 32, 255});
     drawRect(0, bottomStart, WINW, WINH - bottomStart, ANCHOR_TOP_L, (SDL_Color){6, 10, 18, 245});
 
     drawStickFigure(topHeight);
-    drawFadingLines(topHeight, lineHeight);
 
     int inputTop = WINH - lineHeight - 12;
-    drawHistory(bottomStart, inputTop, lineHeight);
+    drawHistory(inputTop, lineHeight);
+    drawScrollBar(bottomStart, inputTop, lineHeight);
     drawInputBar(inputTop, lineHeight);
 }
